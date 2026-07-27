@@ -154,7 +154,8 @@ data class EnvHourly(
     @SerialName("carbon_monoxide") val co: List<Float?> = emptyList(),
     @SerialName("nitrogen_dioxide") val no2: List<Float?> = emptyList(),
     @SerialName("sulphur_dioxide") val so2: List<Float?> = emptyList(),
-    @SerialName("ozone") val ozone: List<Float?> = emptyList()
+    @SerialName("ozone") val ozone: List<Float?> = emptyList(),
+    @SerialName("precipitation_probability") val precipitationProbability: List<Int?> = emptyList()
 )
 
 @Serializable

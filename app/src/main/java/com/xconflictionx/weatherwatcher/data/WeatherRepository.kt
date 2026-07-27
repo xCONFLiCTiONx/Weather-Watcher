@@ -6,13 +6,16 @@ import android.location.Geocoder
 import android.util.Log
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class WeatherRepository(private val context: Context) {
 
@@ -21,10 +24,19 @@ class WeatherRepository(private val context: Context) {
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
     
     private val nwsApiService: NwsApiService by lazy {
         Retrofit.Builder()
             .baseUrl(NwsApiService.BASE_URL)
+            .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(NwsApiService::class.java)
@@ -33,6 +45,7 @@ class WeatherRepository(private val context: Context) {
     private val openMeteoApiService: OpenMeteoApiService by lazy {
         Retrofit.Builder()
             .baseUrl(OpenMeteoApiService.BASE_URL)
+            .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(OpenMeteoApiService::class.java)
@@ -41,9 +54,33 @@ class WeatherRepository(private val context: Context) {
     private val arcgisApiService: ArcgisApiService by lazy {
         Retrofit.Builder()
             .baseUrl(ArcgisApiService.BASE_URL)
+            .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(ArcgisApiService::class.java)
+    }
+
+    private suspend fun <T> retryIO(
+        times: Int = 3,
+        initialDelay: Long = 3000,
+        tag: String,
+        message: String,
+        block: suspend () -> T
+    ): T? {
+        repeat(times - 1) { attempt ->
+            try {
+                return block()
+            } catch (e: Exception) {
+                Log.w(tag, "$message (Attempt ${attempt + 1} failed, retrying in ${initialDelay}ms): ${e.message}")
+            }
+            delay(initialDelay)
+        }
+        return try {
+            block()
+        } catch (e: Exception) {
+            ConsoleManager.logError(tag, message, e)
+            null
+        }
     }
 
     suspend fun saveLocation(input: String) = withContext(Dispatchers.IO) {
@@ -73,6 +110,7 @@ class WeatherRepository(private val context: Context) {
                     .apply()
             }
         } catch (e: Exception) {
+            ConsoleManager.logError("WeatherRepository", "Failed to save location", e)
             sharedPrefs.edit()
                 .putString("location_input", input)
                 .putString("display_name", input)
@@ -104,6 +142,7 @@ class WeatherRepository(private val context: Context) {
                 if (address.adminArea != null) "$name, ${address.adminArea}" else name
             } else input
         } catch (e: Exception) {
+            ConsoleManager.logError("WeatherRepository", "Failed to resolve city name", e)
             input
         }
     }
@@ -123,7 +162,9 @@ class WeatherRepository(private val context: Context) {
                 fullName = if (address.adminArea != null) "$name, ${address.adminArea}" else name
                 stateName = address.adminArea
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            ConsoleManager.logError("WeatherRepository", "Failed to update location from coords", e)
+        }
 
         sharedPrefs.edit()
             .putString("location_input", fullName)
@@ -179,8 +220,10 @@ class WeatherRepository(private val context: Context) {
                 } else null
             }
         } catch (e: SecurityException) {
+            ConsoleManager.logError("WeatherRepository", "GPS permission security error", e)
             null
         } catch (e: Exception) {
+            ConsoleManager.logError("WeatherRepository", "Failed to get current GPS coords", e)
             null
         }
     }
@@ -196,7 +239,7 @@ class WeatherRepository(private val context: Context) {
 
         val coords = getCoordinates() ?: return null
         val parts = coords.split(",")
-        return try {
+        return retryIO(tag = "WeatherRepository", message = "Failed to fetch grid metadata") {
             val response = nwsApiService.getPointData(parts[0], parts[1])
             sharedPrefs.edit()
                 .putString("nws_forecast_url", response.properties.forecastHourly)
@@ -204,8 +247,6 @@ class WeatherRepository(private val context: Context) {
                 .putString("nws_obs_url", response.properties.observationStations)
                 .apply()
             response.properties
-        } catch (e: Exception) {
-            null
         }
     }
 
@@ -284,12 +325,10 @@ class WeatherRepository(private val context: Context) {
     }
 
     suspend fun fetchAllAlertTypes(): List<String> {
-        return try {
+        return retryIO(tag = "WeatherRepository", message = "Failed to fetch active alerts from NWS") {
             val response = nwsApiService.getAlertTypes()
             response.eventTypes
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } ?: emptyList()
     }
 
     fun saveLastAlerts(alerts: List<WeatherEvent>) {
@@ -350,6 +389,7 @@ class WeatherRepository(private val context: Context) {
         return try {
             json.decodeFromString(jsonString)
         } catch (e: Exception) {
+            ConsoleManager.logError("WeatherRepository", "Failed to decode last weather", e)
             null
         }
     }
@@ -359,7 +399,7 @@ class WeatherRepository(private val context: Context) {
         val selected = getSelectedAlerts()
         val regionalSafetyEnabled = isRegionalSafetyEnabled()
         
-        return try {
+        return retryIO(tag = "WeatherRepository", message = "Failed to fetch active alerts from NWS") {
             val response = nwsApiService.getActiveAlerts(coords)
             response.features
                 .filter { feature ->
@@ -395,9 +435,7 @@ class WeatherRepository(private val context: Context) {
                         hash = feature.properties.hashCode()
                     )
                 }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } ?: emptyList()
     }
 
     suspend fun fetchCurrentWeather(): WeatherValues? = coroutineScope {
@@ -406,130 +444,124 @@ class WeatherRepository(private val context: Context) {
         val parts = coords.split(",").mapNotNull { it.trim().toDoubleOrNull() }
         if (parts.size != 2) return@coroutineScope null
 
-        try {
-            // Parallel internal fetches
-            val obsDeferred = async {
+        // Parallel internal fetches with retry
+        val obsDeferred = async {
+            retryIO(tag = "WeatherRepository", message = "Failed to fetch NWS observation") {
                 val stationsResponse = nwsApiService.getStations(meta.observationStations)
-                val firstStationUrl = stationsResponse.features.firstOrNull()?.id ?: return@async null
+                val firstStationUrl = stationsResponse.features.firstOrNull()?.id ?: return@retryIO null
                 nwsApiService.getLatestObservations("$firstStationUrl/observations/latest")
             }
-            
-            val sunDeferred = async {
-                try {
-                    openMeteoApiService.getSunTimes(parts[0], parts[1])
-                } catch (e: Exception) { null }
-            }
-            
-            val aqiDeferred = async {
-                try {
-                    openMeteoApiService.getAqi(parts[0], parts[1])
-                } catch (e: Exception) { null }
-            }
-
-            // Await everything
-            val obsResponse = obsDeferred.await() ?: return@coroutineScope null
-            val sunResponse = sunDeferred.await()
-            val aqiResponse = aqiDeferred.await()
-
-            // 1. Temperature & Basic Obs
-            val tempC = obsResponse.properties.temperature?.value ?: return@coroutineScope null
-            val isImperial = getUnits() == "imperial"
-            val temp = if (isImperial) (tempC * 9/5) + 32 else tempC
-            val lastUpdated = java.time.ZonedDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
-            
-            // 2. Sun Times
-            var sunrise: String? = null
-            var sunset: String? = null
-            sunResponse?.daily?.let { daily ->
-                sunrise = daily.sunrise.firstOrNull()?.let { 
-                    java.time.ZonedDateTime.parse(it + "Z").format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
-                }
-                sunset = daily.sunset.firstOrNull()?.let { 
-                    java.time.ZonedDateTime.parse(it + "Z").format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
-                }
-            }
-
-            // 3. AQI Processing
-            var aqiValue: Int? = null
-            val aqiForecast = mutableListOf<AqiDayInfo>()
-            aqiResponse?.hourly?.let { hourlyData ->
-                aqiValue = hourlyData.aqi.firstOrNull()
-                val times = hourlyData.time
-                val aqiList = hourlyData.aqi
-                val pm25List = hourlyData.pm2_5
-                val pm10List = hourlyData.pm10
-                val ozoneList = hourlyData.ozone
-                val no2List = hourlyData.no2
-                val coList = hourlyData.co
-                val so2List = hourlyData.so2
-                
-                val dailyDataMap = mutableMapOf<String, AqiDayInfo>()
-                for (i in times.indices) {
-                    val date = times[i].split("T")[0]
-                    val currentAqi = aqiList.getOrNull(i) ?: 0
-                    val existing = dailyDataMap[date]
-                    if (existing == null || currentAqi > existing.maxAqi) {
-                        dailyDataMap[date] = AqiDayInfo(
-                            date = date,
-                            maxAqi = currentAqi,
-                            label = getAqiLabel(currentAqi),
-                            pm2_5 = pm25List.getOrNull(i),
-                            pm10 = pm10List.getOrNull(i),
-                            ozone = ozoneList.getOrNull(i),
-                            no2 = no2List.getOrNull(i),
-                            co = coList.getOrNull(i),
-                            so2 = so2List.getOrNull(i)
-                        )
-                    }
-                }
-                aqiForecast.addAll(dailyDataMap.values.filter { it.maxAqi > 0 }.sortedBy { it.date })
-            }
-
-            WeatherValues(
-                temperature = temp,
-                condition = obsResponse.properties.textDescription ?: "Unknown",
-                icon = obsResponse.properties.textDescription,
-                lastUpdated = lastUpdated,
-                humidity = obsResponse.properties.relativeHumidity?.value,
-                windSpeed = obsResponse.properties.windSpeed?.value,
-                rainProbability = null, // Injected by ViewModel from separate parallel fetch
-                sunrise = sunrise,
-                sunset = sunset,
-                aqi = aqiValue,
-                aqiForecast = aqiForecast.sortedBy { it.date }
-            )
-        } catch (e: Exception) {
-            Log.e("WeatherRepository", "Failed to fetch current weather", e)
-            null
         }
+        
+        val sunDeferred = async {
+            retryIO(tag = "WeatherRepository", message = "Failed to fetch sun times") {
+                openMeteoApiService.getSunTimes(parts[0], parts[1])
+            }
+        }
+        
+        val aqiDeferred = async {
+            retryIO(tag = "WeatherRepository", message = "Failed to fetch AQI") {
+                openMeteoApiService.getAqi(parts[0], parts[1])
+            }
+        }
+
+        val obsResponse = obsDeferred.await() ?: return@coroutineScope null
+        val sunResponse = sunDeferred.await()
+        val aqiResponse = aqiDeferred.await()
+
+        // 1. Temperature & Basic Obs
+        val tempC = obsResponse.properties.temperature?.value ?: return@coroutineScope null
+        val isImperial = getUnits() == "imperial"
+        val temp = if (isImperial) (tempC * 9/5) + 32 else tempC
+        val lastUpdated = java.time.ZonedDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+        
+        // 2. Sun Times & Rain Probability
+        var sunrise: String? = null
+        var sunset: String? = null
+        var rainProb: Int? = null
+        sunResponse?.daily?.let { daily ->
+            sunrise = daily.sunrise.firstOrNull()?.let { 
+                java.time.ZonedDateTime.parse(it + "Z").format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+            }
+            sunset = daily.sunset.firstOrNull()?.let { 
+                java.time.ZonedDateTime.parse(it + "Z").format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+            }
+        }
+        sunResponse?.hourly?.let { hourly ->
+            rainProb = hourly.precipitationProbability.firstOrNull()
+        }
+
+        // 3. AQI Processing
+        var aqiValue: Int? = null
+        val aqiForecast = mutableListOf<AqiDayInfo>()
+        aqiResponse?.hourly?.let { hourlyData ->
+            aqiValue = hourlyData.aqi.firstOrNull()
+            val times = hourlyData.time
+            val aqiList = hourlyData.aqi
+            val pm25List = hourlyData.pm2_5
+            val pm10List = hourlyData.pm10
+            val ozoneList = hourlyData.ozone
+            val no2List = hourlyData.no2
+            val coList = hourlyData.co
+            val so2List = hourlyData.so2
+            
+            val dailyDataMap = mutableMapOf<String, AqiDayInfo>()
+            for (i in times.indices) {
+                val date = times[i].split("T")[0]
+                val currentAqi = aqiList.getOrNull(i) ?: 0
+                val existing = dailyDataMap[date]
+                if (existing == null || currentAqi > existing.maxAqi) {
+                    dailyDataMap[date] = AqiDayInfo(
+                        date = date,
+                        maxAqi = currentAqi,
+                        label = getAqiLabel(currentAqi),
+                        pm2_5 = pm25List.getOrNull(i),
+                        pm10 = pm10List.getOrNull(i),
+                        ozone = ozoneList.getOrNull(i),
+                        no2 = no2List.getOrNull(i),
+                        co = coList.getOrNull(i),
+                        so2 = so2List.getOrNull(i)
+                    )
+                }
+            }
+            aqiForecast.addAll(dailyDataMap.values.filter { it.maxAqi > 0 }.sortedBy { it.date })
+        }
+
+        WeatherValues(
+            temperature = temp,
+            condition = obsResponse.properties.textDescription ?: "Unknown",
+            icon = obsResponse.properties.textDescription,
+            lastUpdated = lastUpdated,
+            humidity = obsResponse.properties.relativeHumidity?.value,
+            windSpeed = obsResponse.properties.windSpeed?.value,
+            rainProbability = rainProb,
+            sunrise = sunrise,
+            sunset = sunset,
+            aqi = aqiValue,
+            aqiForecast = aqiForecast.sortedBy { it.date }
+        )
     }
 
     suspend fun fetchForecast(): List<ForecastPeriod>? = withContext(Dispatchers.IO) {
         val meta = getGridMetadata() ?: return@withContext null
-        try {
+        retryIO(tag = "WeatherRepository", message = "Forecast fetch timed out or failed") {
             // Strict 4s timeout for rain/hourly data to prevent dashboard hanging
             withTimeout(4000) {
                 val response = nwsApiService.getHourlyForecast(meta.forecastHourly)
                 response.properties.periods
             }
-        } catch (e: Exception) {
-            Log.e("WeatherRepository", "Forecast fetch timed out or failed")
-            null
         }
     }
 
     suspend fun fetchDailyForecast(): List<ForecastPeriod>? = withContext(Dispatchers.IO) {
         val meta = getGridMetadata() ?: return@withContext null
-        try {
+        retryIO(tag = "WeatherRepository", message = "Daily forecast fetch timed out or failed") {
             // Strict 4s timeout for 7-day outlook
             withTimeout(4000) {
                 val response = nwsApiService.getDailyForecast(meta.forecast)
                 response.properties.periods
             }
-        } catch (e: Exception) {
-            Log.e("WeatherRepository", "Daily forecast fetch timed out or failed")
-            null
         }
     }
 
@@ -538,8 +570,24 @@ class WeatherRepository(private val context: Context) {
         val parts = coords.split(",").mapNotNull { it.trim().toDoubleOrNull() }
         if (parts.size != 2) return null
         
+        // Open-Meteo Pollen is currently Europe-only. 
+        // We skip for US locations to avoid HTTP 400 Bad Request.
+        val lat = parts[0]
+        val lon = parts[1]
+        
+        val isUsLocation = (lat in 24.0..50.0) && (lon in -125.0..-66.0)
+        val state = sharedPrefs.getString("state_name", "") ?: ""
+        
+        if (isUsLocation || state.isNotBlank()) {
+            Log.d("WeatherRepository", "Skipping Pollen fetch (Europe-only source detected by region)")
+            return null
+        }
+
         return try {
-            val response = openMeteoApiService.getPollen(parts[0], parts[1])
+            val response = openMeteoApiService.getPollen(
+                lat = lat, 
+                lon = lon
+            )
             val daily = response.daily ?: return null
             
             fun getLevel(value: Float?): String {
@@ -570,7 +618,13 @@ class WeatherRepository(private val context: Context) {
                 isAvailable = true
             )
         } catch (e: Exception) {
-            Log.e("WeatherRepository", "Failed to fetch pollen data", e)
+            if (e is retrofit2.HttpException && e.code() == 400) {
+                // Known issue: Open-Meteo Pollen is Europe-only. 
+                // We log as a warning to Logcat but SILENCE it from the in-app ConsoleManager.
+                Log.w("WeatherRepository", "Pollen fetch skipped: Service does not support this region.")
+            } else {
+                ConsoleManager.logError("WeatherRepository", "Failed to fetch pollen data", e)
+            }
             null
         }
     }
@@ -584,15 +638,41 @@ class WeatherRepository(private val context: Context) {
         val lon = parts[1]
         // Search radius: +/- 0.4 degrees (~30 miles)
         val bbox = "${lon - 0.4},${lat - 0.4},${lon + 0.4},${lat + 0.4}"
+        
+        // Fix: Add explicit logging to verify coordinate order (lat vs lon)
+        Log.d("WeatherRepository", "ArcGIS Search - Parsed Lat: $lat, Lon: $lon, Bbox: $bbox")
+        
         val state = sharedPrefs.getString("state_name", "") ?: ""
+        val stateQuery = if (state.isNotBlank()) " AND $state" else ""
         
         try {
             // Search query locked to user's state and general tags
-            val query = "tags:(\"Emergency Alerts\" OR \"Public Information\" OR \"Road Closures\" OR \"Utilities\") AND type:\"Feature Service\" AND $state"
+            val query = "tags:(\"Emergency Alerts\" OR \"Public Information\" OR \"Road Closures\" OR \"Utilities\") AND type:\"Feature Service\"$stateQuery"
+            
+            // Log query for troubleshooting
+            Log.d("WeatherRepository", "ArcGIS Portal Query: $query")
+            
             val response = arcgisApiService.searchPortal(query = query, bbox = bbox)
             
+            // Fix: Filter for trusted domains, relevant titles (Arkansas/AR), and Global Noise
+            val filteredResults = response.results.filter { item ->
+                val url = item.url ?: ""
+                val title = item.title
+                
+                val isTrusted = isTrustedFeedDomain(url)
+                val isNotGlobalNoise = !isGlobalNoise(title)
+                
+                val isRelevant = if (state.isNotBlank()) {
+                    // Strict word matching for state/abbreviation
+                    val stateRegex = Regex("\\b${Regex.escape(state)}\\b|\\bAR\\b", RegexOption.IGNORE_CASE)
+                    title.contains(stateRegex)
+                } else true
+                
+                isTrusted && isNotGlobalNoise && isRelevant
+            }
+
             // Clean up titles
-            val cleanedResults = response.results.map { item ->
+            val cleanedResults = filteredResults.map { item ->
                 item.copy(title = cleanTechnicalTitle(item.title))
             }
 
@@ -601,9 +681,30 @@ class WeatherRepository(private val context: Context) {
             
             cleanedResults
         } catch (e: Exception) {
-            Log.e("WeatherRepository", "ArcGIS discovery failed", e)
+            ConsoleManager.logError("WeatherRepository", "ArcGIS discovery failed", e)
             emptyList()
         }
+    }
+
+    private fun isTrustedFeedDomain(url: String): Boolean {
+        if (url.isBlank()) return false
+        val lowUrl = url.lowercase()
+        // Allow common ArcGIS domains and trusted US govt/state extensions
+        return lowUrl.contains("arcgis.com") || 
+               lowUrl.contains(".gov") || 
+               lowUrl.contains(".us") || 
+               lowUrl.contains("state.ar.us")
+    }
+
+    private fun isGlobalNoise(title: String): Boolean {
+        if (title.isBlank()) return false
+        val lowTitle = title.lowercase()
+        val blacklist = listOf(
+            "esri_", "_eu", "europe", "global", "world", 
+            "contributors", "basemap", "national", "continental",
+            "federal", "usa_", "united states"
+        )
+        return blacklist.any { lowTitle.contains(it) }
     }
 
     private fun cleanTechnicalTitle(title: String): String {
@@ -629,6 +730,9 @@ class WeatherRepository(private val context: Context) {
         val lat = parts[0]
         val lon = parts[1]
         
+        // Fix: Add explicit logging to verify coordinate order (lat vs lon)
+        Log.d("WeatherRepository", "Infrastructure Fetch - Parsed Lat: $lat, Lon: $lon")
+
         suspend fun fetchWithRadius(radius: Double): List<WeatherEvent> = coroutineScope {
             val bboxJson = "{\"xmin\":${lon - radius},\"ymin\":${lat - radius},\"xmax\":${lon + radius},\"ymax\":${lat + radius},\"spatialReference\":{\"wkid\":4326}}"
             val urls = getDiscoveredFeeds()
@@ -636,7 +740,8 @@ class WeatherRepository(private val context: Context) {
             val deferredAlerts = urls.map { url ->
                 async {
                     try {
-                        withTimeout(5000) {
+                        // Tightened timeout to 3.5s to prevent dashboard hangs on distant/slow servers
+                        withTimeout(3500) {
                             val response = arcgisApiService.queryFeatureService(
                                 url = url + "/0/query",
                                 geometry = bboxJson,
@@ -686,6 +791,9 @@ class WeatherRepository(private val context: Context) {
                             feedAlerts
                         }
                     } catch (e: Exception) {
+                        // Silent log for individual feed failures to prevent Console flooding
+                        // Details are still available in Logcat for developers
+                        Log.w("WeatherRepository", "Skipping slow/failed feed: $url - ${e.message}")
                         emptyList<WeatherEvent>()
                     }
                 }

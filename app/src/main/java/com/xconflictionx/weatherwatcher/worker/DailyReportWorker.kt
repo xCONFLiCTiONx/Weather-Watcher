@@ -7,6 +7,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.xconflictionx.weatherwatcher.data.WeatherRepository
+import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import com.xconflictionx.weatherwatcher.util.NotificationHelper
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -59,7 +60,10 @@ class DailyReportWorker(
                         val isFutureToday = startTime.isAfter(now) && startTime.isBefore(endOfDay)
                         
                         (isCurrent || isFutureToday) && prob > 20 && isRain
-                    } catch (e: Exception) { false }
+                    } catch (e: Exception) { 
+                        ConsoleManager.logError("DailyReportWorker", "Rain forecast filter error", e)
+                        false 
+                    }
                 }
                 
                 if (activeRain != null) {
@@ -90,7 +94,7 @@ class DailyReportWorker(
             )
             
         } catch (e: Exception) {
-            Log.e("DailyReportWorker", "Failed to send daily report", e)
+            ConsoleManager.logError("DailyReportWorker", "Daily report generation failed", e)
             // Schedule next report even on error to keep the cycle alive
             scheduleNext(applicationContext, repository)
             return Result.retry()

@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.xconflictionx.weatherwatcher.data.WeatherRepository
+import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import com.xconflictionx.weatherwatcher.util.NotificationHelper
 import kotlinx.coroutines.*
 import java.time.ZonedDateTime
@@ -33,7 +34,7 @@ class WeatherAlertWorker(
                 )
             }
         } catch (e: Exception) {
-            Log.e("WeatherAlertWorker", "Background location tracking failed", e)
+            ConsoleManager.logError("WeatherAlertWorker", "Background location tracking failed", e)
         }
 
         // 2. Parallel Background Fetch
@@ -112,7 +113,7 @@ class WeatherAlertWorker(
                     }
                 }
             } catch (e: Exception) {
-                Log.e("WeatherAlertWorker", "Rain processing failed", e)
+                ConsoleManager.logError("WeatherAlertWorker", "Rain processing failed", e)
             }
         }
 
@@ -144,7 +145,7 @@ class WeatherAlertWorker(
                 }
             }
         } catch (e: Exception) {
-            Log.e("WeatherAlertWorker", "Alerts processing failed", e)
+            ConsoleManager.logError("WeatherAlertWorker", "Alerts processing failed", e)
         }
 
         return Result.success()

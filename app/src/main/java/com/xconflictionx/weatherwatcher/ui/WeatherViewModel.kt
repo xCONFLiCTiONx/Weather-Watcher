@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.xconflictionx.weatherwatcher.data.*
+import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import com.xconflictionx.weatherwatcher.util.NotificationHelper
 import com.xconflictionx.weatherwatcher.worker.WeatherAlertWorker
 import kotlinx.coroutines.*
@@ -98,12 +99,74 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private val _localFeeds = MutableStateFlow<List<ArcgisItem>>(emptyList())
     val localFeeds: StateFlow<List<ArcgisItem>> = _localFeeds
 
+    private val _serviceStatuses = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val serviceStatuses: StateFlow<Map<String, Boolean>> = _serviceStatuses
+
+    val consoleLogs = ConsoleManager.logs
+
     init {
         refreshWeather()
         startWeatherWork()
         updateBatteryOptimizationStatus()
+        startServiceHealer()
         if (repository.isDailyReportEnabled()) {
             com.xconflictionx.weatherwatcher.worker.DailyReportWorker.scheduleNext(context, repository)
+        }
+    }
+
+    private fun startServiceHealer() {
+        viewModelScope.launch {
+            while (isActive) {
+                // Sleep for 60 seconds between optimal health checks
+                delay(60_000)
+                
+                val currentStatuses = _serviceStatuses.value
+                val failedServices = currentStatuses.filter { !it.value }.keys
+                
+                if (failedServices.isNotEmpty()) {
+                    Log.d("WeatherViewModel", "Healer: Attempting to recover ${failedServices.size} failed services...")
+                    
+                    coroutineScope {
+                        failedServices.forEach { serviceName ->
+                            launch {
+                                try {
+                                    val success = when (serviceName) {
+                                        "National Weather Service" -> {
+                                            val alerts = repository.fetchAlerts()
+                                            // Recovery is successful if we get any result (even empty list) without exception
+                                            _activeAlerts.value = alerts
+                                            true
+                                        }
+                                        "Open-Meteo (AQI/Sun)" -> {
+                                            val weather = repository.fetchCurrentWeather()
+                                            if (weather != null) {
+                                                _currentWeather.value = weather
+                                                true
+                                            } else false
+                                        }
+                                        "ArcGIS Local Alerts" -> {
+                                            if (_infrastructureAlertsEnabled.value) {
+                                                repository.fetchInfrastructureAlerts()
+                                                true
+                                            } else true
+                                        }
+                                        else -> true
+                                    }
+                                    
+                                    if (success) {
+                                        val updated = _serviceStatuses.value.toMutableMap()
+                                        updated[serviceName] = true
+                                        _serviceStatuses.value = updated
+                                        Log.d("WeatherViewModel", "Healer: $serviceName recovered successfully!")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w("WeatherViewModel", "Healer: Recovery failed for $serviceName - ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -117,10 +180,11 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isRefreshing.value = true
             _errorMessage.value = null
-            var status = ""
+            var statusStr = ""
+            val statuses = mutableMapOf<String, Boolean>()
             
             try {
-                kotlinx.coroutines.coroutineScope {
+                coroutineScope {
                     // Parallel Block: Fetch everything simultaneously
                     val weatherDeferred = async { repository.fetchCurrentWeather() }
                     val nwsAlertsDeferred = async { repository.fetchAlerts() }
@@ -132,36 +196,69 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     val pollenDeferred = async { repository.fetchPollenData() }
 
                     // Apply a hard cap on patience for the UI refresh
-                    kotlinx.coroutines.withTimeoutOrNull(8000) {
-                        // 1. Weather
-                        val weather = weatherDeferred.await()
+                    withTimeoutOrNull(8000) {
+                        // 1. Weather & Open-Meteo Basics
+                        val weather = try {
+                            val result = weatherDeferred.await()
+                            statuses["Open-Meteo (AQI/Sun)"] = result != null
+                            result
+                        } catch (e: Exception) {
+                            statuses["Open-Meteo (AQI/Sun)"] = false
+                            null
+                        }
+
                         if (weather != null) {
                             _currentWeather.value = weather
                             repository.saveLastWeather(weather)
-                            status += "Weather: OK | "
+                            statusStr += "Weather: OK | "
                         }
 
                         // 2. Consolidated Alerts
-                        val nwsAlerts = nwsAlertsDeferred.await()
-                        val localAlerts = localAlertsDeferred.await()
+                        val nwsAlerts = try {
+                            val result = nwsAlertsDeferred.await()
+                            statuses["National Weather Service"] = true
+                            result
+                        } catch (e: Exception) {
+                            statuses["National Weather Service"] = false
+                            emptyList()
+                        }
+
+                        val localAlerts = try {
+                            val result = localAlertsDeferred.await()
+                            statuses["ArcGIS Local Alerts"] = true
+                            result
+                        } catch (e: Exception) {
+                            statuses["ArcGIS Local Alerts"] = false
+                            emptyList()
+                        }
+
                         val unifiedAlerts = (nwsAlerts + localAlerts).distinctBy { it.title.lowercase().trim() }
                         _activeAlerts.value = unifiedAlerts
                         repository.saveLastAlerts(unifiedAlerts)
-                        status += "Alerts: ${if (unifiedAlerts.isEmpty()) "None" else "Active (${unifiedAlerts.size})"} | "
+                        statusStr += "Alerts: ${if (unifiedAlerts.isEmpty()) "None" else "Active (${unifiedAlerts.size})"} | "
 
-                        // 3. Forecasts & Rain Logic
-                        val hourly = hourlyDeferred.await()
+                        // 3. Forecasts
+                        val hourly = try {
+                            val result = hourlyDeferred.await()
+                            // Note: NWS is tracked via alerts mainly, but we can group forecast under it
+                            if (statuses["National Weather Service"] != false) {
+                                statuses["National Weather Service"] = result != null
+                            }
+                            result
+                        } catch (e: Exception) {
+                            statuses["National Weather Service"] = false
+                            null
+                        }
+
                         if (hourly != null) {
-                            // Inject current rain chance from forecast into weather card
-                            _currentWeather.value = _currentWeather.value?.copy(
-                                rainProbability = hourly.firstOrNull()?.probabilityOfPrecipitation?.value
-                            )
-
                             val now = java.time.ZonedDateTime.now()
                             val futureHourly = hourly.filter { 
                                 try {
                                     java.time.ZonedDateTime.parse(it.endTime).isAfter(now)
-                                } catch (e: Exception) { true }
+                                } catch (e: Exception) { 
+                                    ConsoleManager.logError("WeatherViewModel", "Hourly filter error", e)
+                                    true 
+                                }
                             }
                             _hourlyForecast.value = futureHourly.take(24)
                             
@@ -196,21 +293,30 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                                 _isCurrentlyRaining.value = false
                                 _nextRainTime.value = null
                             }
-                            status += "Hourly: OK | "
+                            statusStr += "Hourly: OK | "
                         }
 
-                        val daily = dailyDeferred.await()
+                        val daily = try {
+                            dailyDeferred.await()
+                        } catch (e: Exception) { null }
                         if (daily != null) {
                             _dailyForecast.value = daily
-                            status += "7-Day: OK | "
+                            statusStr += "7-Day: OK | "
                         }
 
-                        // 4. Pollen
-                        val pollen = pollenDeferred.await()
+                        // 4. Pollen (Non-Critical)
+                        val pollen = try {
+                            pollenDeferred.await()
+                        } catch (e: Exception) {
+                            null
+                        }
                         _pollenData.value = pollen
-                        if (pollen != null) status += "Pollen: OK"
+                        if (pollen != null) statusStr += "Pollen: OK"
                     }
                 }
+
+                // Update final statuses
+                _serviceStatuses.value = statuses
 
                 // 5. Hazard Types (Background)
                 if (_allHazardTypes.value.isEmpty()) {
@@ -224,10 +330,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 }
                 
             } catch (e: Exception) {
-                Log.e("WeatherViewModel", "Failed to refresh weather", e)
+                ConsoleManager.logError("WeatherViewModel", "Global weather refresh failed", e)
                 _errorMessage.value = "Unable to update all data"
             } finally {
-                _lastSyncStatus.value = status.trimEnd(' ', '|')
+                _lastSyncStatus.value = statusStr.trimEnd(' ', '|')
                 _lastBackgroundSync.value = repository.getLastBackgroundSyncTime()
                 _isRefreshing.value = false
             }
@@ -371,8 +477,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     _errorMessage.value = "Unable to detect location."
                 }
             } catch (e: SecurityException) {
+                ConsoleManager.logError("WeatherViewModel", "Location security error", e)
                 _errorMessage.value = "Location permission denied."
             } catch (e: Exception) {
+                ConsoleManager.logError("WeatherViewModel", "Location detection failed", e)
                 _errorMessage.value = "Failed to detect location."
             } finally {
                 _isRefreshing.value = false
@@ -417,6 +525,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             }
             context.startActivity(intent)
         } catch (e: Exception) {
+            ConsoleManager.logError("WeatherViewModel", "Failed to open battery optimization settings", e)
             // Fallback to general settings list if the direct prompt fails
             val intent = android.content.Intent().apply {
                 action = android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS

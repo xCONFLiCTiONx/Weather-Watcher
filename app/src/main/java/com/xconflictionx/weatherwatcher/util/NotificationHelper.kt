@@ -92,7 +92,9 @@ class NotificationHelper(private val context: Context) {
             try {
                 notify(System.currentTimeMillis().toInt(), builder.build())
             } catch (e: SecurityException) {
-                // Handle permission not granted
+                ConsoleManager.logError("NotificationHelper", "Notification permission missing", e)
+            } catch (e: Exception) {
+                ConsoleManager.logError("NotificationHelper", "Failed to show notification", e)
             }
         }
     }

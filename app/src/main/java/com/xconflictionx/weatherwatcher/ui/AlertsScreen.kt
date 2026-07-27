@@ -29,7 +29,8 @@ import com.xconflictionx.weatherwatcher.data.ForecastPeriod
 import com.xconflictionx.weatherwatcher.data.PollenData
 import com.xconflictionx.weatherwatcher.data.PollenDayInfo
 import com.xconflictionx.weatherwatcher.data.WeatherEvent
-import com.xconflictionx.weatherwatcher.data.WeatherValues
+import com.xconflictionx.weatherwatcher.data.*
+import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -233,7 +234,10 @@ fun ForecastDetailDialog(period: ForecastPeriod, onDismiss: () -> Unit) {
                     text = if (period.name.isNullOrBlank()) {
                         try {
                             ZonedDateTime.parse(period.startTime).format(DateTimeFormatter.ofPattern("h:mm a, MMM d"))
-                        } catch (e: Exception) { "Forecast Detail" }
+                        } catch (e: Exception) { 
+                        ConsoleManager.logError("AlertsScreen", "Forecast time parsing error", e)
+                        "Forecast Detail" 
+                    }
                     } else period.name,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
@@ -444,7 +448,10 @@ fun PollenTrendDialog(
                     val dayName = try {
                         val date = java.time.LocalDate.parse(info.date)
                         date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US)
-                    } catch (e: Exception) { info.date }
+                    } catch (e: Exception) { 
+                        ConsoleManager.logError("AlertsScreen", "Pollen date parsing error", e)
+                        info.date 
+                    }
 
                     val level = when(label) {
                         "Grass" -> info.grassLevel
@@ -607,6 +614,7 @@ fun CurrentWeatherHero(
                         dt.format(DateTimeFormatter.ofPattern("EEE 'at' h:mm a"))
                     }
                 } catch (e: Exception) {
+                    ConsoleManager.logError("AlertsScreen", "Hero card time parsing error", e)
                     "soon"
                 }
 
@@ -711,6 +719,7 @@ fun ForecastItem(
             }
         }
     } catch (e: Exception) {
+        ConsoleManager.logError("AlertsScreen", "Forecast item time parsing error", e)
         "Now"
     }
 
