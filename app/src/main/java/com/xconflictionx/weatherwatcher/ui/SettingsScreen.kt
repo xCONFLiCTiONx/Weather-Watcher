@@ -499,8 +499,14 @@ fun HazardSelectionHeader(query: String, onSearchChange: (String) -> Unit, onSel
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = query, onValueChange = onSearchChange, label = { Text("Search Hazards") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }, singleLine = true, shape = RoundedCornerShape(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onSelectAll) { Text("Select All") }
-            TextButton(onClick = onClearAll) { Text("Clear All") }
+            TextButton(
+                onClick = onSelectAll,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+            ) { Text("Select All") }
+            TextButton(
+                onClick = onClearAll,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+            ) { Text("Clear All") }
         }
     }
 }
@@ -563,8 +569,18 @@ fun HazardDetailDialog(name: String, selected: Set<String>, onToggle: (String) -
         onDismissRequest = onDismiss,
         title = { Text(name, fontWeight = FontWeight.Bold) },
         text = { Text("Detailed information for $name alerts. You will receive real-time notifications when this hazard is active.", style = MaterialTheme.typography.bodyMedium) },
-        confirmButton = { Button(onClick = { if (!isEnabled) onToggle(name); onDismiss() }) { Text("Enable") } },
-        dismissButton = { TextButton(onClick = { if (isEnabled) onToggle(name); onDismiss() }) { Text("Disable", color = MaterialTheme.colorScheme.error) } }
+        confirmButton = { 
+            Button(
+                onClick = { if (!isEnabled) onToggle(name); onDismiss() },
+                colors = ButtonDefaults.buttonColors(contentColor = Color.White)
+            ) { Text("Enable") } 
+        },
+        dismissButton = { 
+            TextButton(
+                onClick = { if (isEnabled) onToggle(name); onDismiss() },
+                colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
+            ) { Text("Disable") } 
+        }
     )
 }
 

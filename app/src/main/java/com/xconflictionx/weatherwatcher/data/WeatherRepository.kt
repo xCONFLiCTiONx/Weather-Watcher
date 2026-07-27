@@ -220,7 +220,8 @@ class WeatherRepository(private val context: Context) {
                 } else null
             }
         } catch (e: SecurityException) {
-            ConsoleManager.logError("WeatherRepository", "GPS permission security error", e)
+            // Log to system log only, don't flood user console with expected permission issues
+            Log.w("WeatherRepository", "GPS permission not yet granted: ${e.message}")
             null
         } catch (e: Exception) {
             ConsoleManager.logError("WeatherRepository", "Failed to get current GPS coords", e)

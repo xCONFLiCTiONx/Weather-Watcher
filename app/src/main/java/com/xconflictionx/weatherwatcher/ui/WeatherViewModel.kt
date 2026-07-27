@@ -477,7 +477,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     _errorMessage.value = "Unable to detect location."
                 }
             } catch (e: SecurityException) {
-                ConsoleManager.logError("WeatherViewModel", "Location security error", e)
+                // Log to system log only
+                Log.w("WeatherViewModel", "Location permission denied: ${e.message}")
                 _errorMessage.value = "Location permission denied."
             } catch (e: Exception) {
                 ConsoleManager.logError("WeatherViewModel", "Location detection failed", e)

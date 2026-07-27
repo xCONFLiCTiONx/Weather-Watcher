@@ -126,7 +126,7 @@ fun AlertsScreen(
             if (dailyForecast.isNotEmpty()) {
                 item {
                     ForecastSection(
-                        title = "14-Day Outlook", 
+                        title = "7-Day Outlook", 
                         periods = dailyForecast, 
                         isDaily = true,
                         onItemClick = { selectedForecast = it }
