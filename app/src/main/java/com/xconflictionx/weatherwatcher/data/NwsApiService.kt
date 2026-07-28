@@ -52,6 +52,6 @@ interface NwsApiService {
 
     companion object {
         const val BASE_URL = "https://api.weather.gov/"
-        const val USER_AGENT = "(WeatherWatcherApp, support@xconflictionx.cc)"
+        const val USER_AGENT = "WeatherWatcher/1.1 (support@xconflictionx.cc)"
     }
 }

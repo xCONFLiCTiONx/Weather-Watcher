@@ -180,163 +180,137 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isRefreshing.value = true
             _errorMessage.value = null
-            var statusStr = ""
-            val statuses = mutableMapOf<String, Boolean>()
             
-            try {
-                coroutineScope {
-                    // Parallel Block: Fetch everything simultaneously
-                    val weatherDeferred = async { repository.fetchCurrentWeather() }
-                    val nwsAlertsDeferred = async { repository.fetchAlerts() }
-                    val localAlertsDeferred = async { 
-                        if (_infrastructureAlertsEnabled.value) repository.fetchInfrastructureAlerts() else emptyList() 
-                    }
-                    val hourlyDeferred = async { repository.fetchForecast() }
-                    val dailyDeferred = async { repository.fetchDailyForecast() }
-                    val pollenDeferred = async { repository.fetchPollenData() }
-
-                    // Apply a hard cap on patience for the UI refresh
-                    withTimeoutOrNull(8000) {
-                        // 1. Weather & Open-Meteo Basics
-                        val weather = try {
-                            val result = weatherDeferred.await()
-                            statuses["Open-Meteo (AQI/Sun)"] = result != null
-                            result
-                        } catch (e: Exception) {
-                            statuses["Open-Meteo (AQI/Sun)"] = false
-                            null
-                        }
-
+            val statuses = _serviceStatuses.value.toMutableMap()
+            
+            coroutineScope {
+                // 1. Current Weather & Sun/AQI (Open-Meteo)
+                launch {
+                    try {
+                        val weather = repository.fetchCurrentWeather()
                         if (weather != null) {
                             _currentWeather.value = weather
                             repository.saveLastWeather(weather)
-                            statusStr += "Weather: OK | "
+                            statuses["Open-Meteo (AQI/Sun)"] = true
+                        } else {
+                            statuses["Open-Meteo (AQI/Sun)"] = false
                         }
+                    } catch (e: Exception) {
+                        statuses["Open-Meteo (AQI/Sun)"] = false
+                    }
+                    _serviceStatuses.value = statuses.toMap()
+                }
 
-                        // 2. Consolidated Alerts
-                        val nwsAlerts = try {
-                            val result = nwsAlertsDeferred.await()
-                            statuses["National Weather Service"] = true
-                            result
-                        } catch (e: Exception) {
-                            statuses["National Weather Service"] = false
-                            emptyList()
-                        }
+                // 2. NWS Alerts
+                launch {
+                    try {
+                        val alerts = repository.fetchAlerts()
+                        statuses["National Weather Service"] = true
+                        _activeAlerts.value = alerts
+                        repository.saveLastAlerts(alerts)
+                    } catch (e: Exception) {
+                        statuses["National Weather Service"] = false
+                    }
+                    _serviceStatuses.value = statuses.toMap()
+                }
 
-                        val localAlerts = try {
-                            val result = localAlertsDeferred.await()
+                // 3. ArcGIS Infrastructure Alerts
+                launch {
+                    if (_infrastructureAlertsEnabled.value) {
+                        try {
+                            val local = repository.fetchInfrastructureAlerts()
+                            // Update UI only if we have new local info, or keep combined state
+                            // For simplicity, AlertsScreen collects from _activeAlerts
+                            // So let's update combined alerts here
+                            val nws = _activeAlerts.value.filter { !it.id.contains("infra") }
+                            _activeAlerts.value = (nws + local).distinctBy { it.title.lowercase().trim() }
                             statuses["ArcGIS Local Alerts"] = true
-                            result
                         } catch (e: Exception) {
                             statuses["ArcGIS Local Alerts"] = false
-                            emptyList()
                         }
+                        _serviceStatuses.value = statuses.toMap()
+                    }
+                }
 
-                        val unifiedAlerts = (nwsAlerts + localAlerts).distinctBy { it.title.lowercase().trim() }
-                        _activeAlerts.value = unifiedAlerts
-                        repository.saveLastAlerts(unifiedAlerts)
-                        statusStr += "Alerts: ${if (unifiedAlerts.isEmpty()) "None" else "Active (${unifiedAlerts.size})"} | "
-
-                        // 3. Forecasts
-                        val hourly = try {
-                            val result = hourlyDeferred.await()
-                            // Note: NWS is tracked via alerts mainly, but we can group forecast under it
-                            if (statuses["National Weather Service"] != false) {
-                                statuses["National Weather Service"] = result != null
-                            }
-                            result
-                        } catch (e: Exception) {
-                            statuses["National Weather Service"] = false
-                            null
-                        }
-
+                // 4. Forecasts (Hourly)
+                launch {
+                    try {
+                        val hourly = repository.fetchForecast()
                         if (hourly != null) {
                             val now = java.time.ZonedDateTime.now()
                             val futureHourly = hourly.filter { 
                                 try {
                                     java.time.ZonedDateTime.parse(it.endTime).isAfter(now)
-                                } catch (e: Exception) { 
-                                    ConsoleManager.logError("WeatherViewModel", "Hourly filter error", e)
-                                    true 
-                                }
+                                } catch (e: Exception) { true }
                             }
                             _hourlyForecast.value = futureHourly.take(24)
                             
+                            // Process Rain Logic immediately
                             val isRainy = { period: ForecastPeriod ->
                                 val prob = period.probabilityOfPrecipitation?.value ?: 0
                                 val forecast = period.shortForecast ?: ""
                                 prob > 20 && (forecast.contains("Rain", true) || 
                                              forecast.contains("Showers", true) || 
-                                             forecast.contains("Thunderstorm", true) ||
-                                             forecast.contains("Drizzle", true) ||
-                                             forecast.contains("Precipitation", true))
+                                             forecast.contains("Thunderstorm", true))
                             }
-
-                            val firstRainPeriod = futureHourly.firstOrNull { isRainy(it) }
-                            if (firstRainPeriod != null) {
-                                val startTime = java.time.ZonedDateTime.parse(firstRainPeriod.startTime)
+                            val nextRain = futureHourly.firstOrNull { isRainy(it) }
+                            if (nextRain != null) {
+                                val startTime = java.time.ZonedDateTime.parse(nextRain.startTime)
                                 if (startTime.isBefore(now)) {
                                     _isCurrentlyRaining.value = true
-                                    var currentEnd = firstRainPeriod.endTime
-                                    val firstIndex = futureHourly.indexOf(firstRainPeriod)
-                                    if (firstIndex != -1) {
-                                        for (i in firstIndex + 1 until futureHourly.size) {
-                                            if (isRainy(futureHourly[i])) currentEnd = futureHourly[i].endTime else break
-                                        }
-                                    }
-                                    _nextRainTime.value = currentEnd
+                                    _nextRainTime.value = nextRain.endTime
                                 } else {
                                     _isCurrentlyRaining.value = false
-                                    _nextRainTime.value = firstRainPeriod.startTime
+                                    _nextRainTime.value = nextRain.startTime
                                 }
                             } else {
                                 _isCurrentlyRaining.value = false
                                 _nextRainTime.value = null
                             }
-                            statusStr += "Hourly: OK | "
                         }
-
-                        val daily = try {
-                            dailyDeferred.await()
-                        } catch (e: Exception) { null }
-                        if (daily != null) {
-                            _dailyForecast.value = daily
-                            statusStr += "7-Day: OK | "
-                        }
-
-                        // 4. Pollen (Non-Critical)
-                        val pollen = try {
-                            pollenDeferred.await()
-                        } catch (e: Exception) {
-                            null
-                        }
-                        _pollenData.value = pollen
-                        if (pollen != null) statusStr += "Pollen: OK"
+                    } catch (e: Exception) {
+                        // Forecast failure is non-critical for status but we can log
+                        Log.w("WeatherViewModel", "Hourly forecast failed: ${e.message}")
                     }
                 }
 
-                // Update final statuses
-                _serviceStatuses.value = statuses
+                // 5. Daily Forecast
+                launch {
+                    try {
+                        val daily = repository.fetchDailyForecast()
+                        if (daily != null) _dailyForecast.value = daily
+                    } catch (e: Exception) {
+                        Log.w("WeatherViewModel", "Daily forecast failed: ${e.message}")
+                    }
+                }
 
-                // 5. Hazard Types (Background)
-                if (_allHazardTypes.value.isEmpty()) {
-                    val hazards = repository.fetchAllAlertTypes()
-                    _allHazardTypes.value = hazards.filter { !it.equals("Test", ignoreCase = true) }
+                // 6. Pollen
+                launch {
+                    try {
+                        val pollen = repository.fetchPollenData()
+                        _pollenData.value = pollen
+                    } catch (e: Exception) {
+                        Log.w("WeatherViewModel", "Pollen fetch failed (silently): ${e.message}")
+                    }
                 }
                 
-                // 6. Local Feed Discovery (Background)
-                if (_infrastructureAlertsEnabled.value && _localFeeds.value.isEmpty()) {
-                    _localFeeds.value = repository.discoverLocalFeeds()
+                // 7. Discovery (Background)
+                launch {
+                    if (_infrastructureAlertsEnabled.value && _localFeeds.value.isEmpty()) {
+                        _localFeeds.value = repository.discoverLocalFeeds()
+                    }
                 }
-                
-            } catch (e: Exception) {
-                ConsoleManager.logError("WeatherViewModel", "Global weather refresh failed", e)
-                _errorMessage.value = "Unable to update all data"
-            } finally {
-                _lastSyncStatus.value = statusStr.trimEnd(' ', '|')
-                _lastBackgroundSync.value = repository.getLastBackgroundSyncTime()
-                _isRefreshing.value = false
             }
+            
+            // Background cleanup tasks
+            if (_allHazardTypes.value.isEmpty()) {
+                val hazards = repository.fetchAllAlertTypes()
+                _allHazardTypes.value = hazards.filter { !it.equals("Test", ignoreCase = true) }
+            }
+            
+            _lastSyncStatus.value = "Last Sync: " + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+            _lastBackgroundSync.value = repository.getLastBackgroundSyncTime()
+            _isRefreshing.value = false
         }
     }
 

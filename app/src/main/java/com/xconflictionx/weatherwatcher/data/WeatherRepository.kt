@@ -61,8 +61,8 @@ class WeatherRepository(private val context: Context) {
     }
 
     private suspend fun <T> retryIO(
-        times: Int = 3,
-        initialDelay: Long = 3000,
+        times: Int = 2,
+        initialDelay: Long = 2000,
         tag: String,
         message: String,
         block: suspend () -> T
@@ -78,13 +78,8 @@ class WeatherRepository(private val context: Context) {
         return try {
             block()
         } catch (e: Exception) {
-            // Silence common timeouts from the Console to reduce noise.
-            // These are handled by the Service Healer loop optimally.
-            if (e is kotlinx.coroutines.TimeoutCancellationException || e is java.net.SocketTimeoutException) {
-                Log.w(tag, "$message: Server Busy (Final Timeout)")
-            } else {
-                ConsoleManager.logError(tag, message, e)
-            }
+            // No longer silencing timeouts. Report everything to Console for debugging.
+            ConsoleManager.logError(tag, message, e)
             null
         }
     }

@@ -75,7 +75,11 @@ fun AlertsScreen(
                     )
                 )
                 if (isRefreshing) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.Transparent
+                    )
                 }
             }
         }
