@@ -78,7 +78,13 @@ class WeatherRepository(private val context: Context) {
         return try {
             block()
         } catch (e: Exception) {
-            ConsoleManager.logError(tag, message, e)
+            // Silence common timeouts from the Console to reduce noise.
+            // These are handled by the Service Healer loop optimally.
+            if (e is kotlinx.coroutines.TimeoutCancellationException || e is java.net.SocketTimeoutException) {
+                Log.w(tag, "$message: Server Busy (Final Timeout)")
+            } else {
+                ConsoleManager.logError(tag, message, e)
+            }
             null
         }
     }

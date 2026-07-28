@@ -9,10 +9,13 @@ object ConsoleManager {
     val logs: StateFlow<List<LogEntry>> = _logs
 
     fun logError(tag: String, message: String, throwable: Throwable? = null) {
-        val displayMessage = when (throwable) {
-            is java.net.SocketTimeoutException -> "$message: Server Busy (Timeout)"
-            is java.net.UnknownHostException -> "$message: No Internet / DNS Error"
-            is retrofit2.HttpException -> "$message: Server Error (${throwable.code()})"
+        val displayMessage = when {
+            throwable is java.net.SocketTimeoutException || throwable is kotlinx.coroutines.TimeoutCancellationException -> 
+                "$message: Server Busy (Timeout)"
+            throwable is java.net.UnknownHostException -> 
+                "$message: No Internet / DNS Error"
+            throwable is retrofit2.HttpException -> 
+                "$message: Server Error (${throwable.code()})"
             else -> message
         }
 
