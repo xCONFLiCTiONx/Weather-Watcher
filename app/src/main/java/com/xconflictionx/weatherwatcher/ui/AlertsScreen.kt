@@ -52,10 +52,10 @@ fun AlertsScreen(
     val isCurrentlyRaining by viewModel.isCurrentlyRaining.collectAsState()
 
     var selectedAlert by remember { mutableStateOf<WeatherEvent?>(null) }
-    var selectedDetail by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedForecast by remember { mutableStateOf<ForecastPeriod?>(null) }
     var selectedAqi by remember { mutableStateOf<AqiDayInfo?>(null) }
     var selectedAllergen by remember { mutableStateOf<Pair<String, List<PollenDayInfo>>?>(null) }
+    var showMainDetails by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -63,7 +63,7 @@ fun AlertsScreen(
                 TopAppBar(
                     title = { Text("Weather Watcher", fontWeight = FontWeight.ExtraBold) },
                     actions = {
-                        IconButton(onClick = { viewModel.refreshWeather() }) {
+                        IconButton(onClick = { viewModel.refreshWeather(isManual = true) }) {
                             Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                         }
                         IconButton(onClick = onNavigateToSettings) {
@@ -113,7 +113,7 @@ fun AlertsScreen(
                     weatherValues = currentWeather,
                     nextRainTime = nextRainTime,
                     isCurrentlyRaining = isCurrentlyRaining,
-                    onElementClick = { title, desc -> selectedDetail = title to desc }
+                    onClick = { showMainDetails = true }
                 )
             }
 
@@ -188,14 +188,6 @@ fun AlertsScreen(
             )
         }
 
-        if (selectedDetail != null) {
-            DetailDialog(
-                title = selectedDetail!!.first,
-                description = selectedDetail!!.second,
-                onDismiss = { selectedDetail = null }
-            )
-        }
-
         if (selectedForecast != null) {
             ForecastDetailDialog(
                 period = selectedForecast!!,
@@ -217,19 +209,247 @@ fun AlertsScreen(
                 onDismiss = { selectedAllergen = null }
             )
         }
+
+        if (showMainDetails) {
+            MainWeatherDetailDialog(
+                location = location,
+                weatherValues = currentWeather,
+                nextRainTime = nextRainTime,
+                isCurrentlyRaining = isCurrentlyRaining,
+                dailyForecast = dailyForecast,
+                onDismiss = { showMainDetails = false }
+            )
+        }
     }
 }
 
 @Composable
-fun ForecastDetailDialog(period: ForecastPeriod, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+fun MainWeatherDetailDialog(
+    location: String,
+    weatherValues: WeatherValues?,
+    nextRainTime: String?,
+    isCurrentlyRaining: Boolean,
+    dailyForecast: List<ForecastPeriod>,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.9f)
+                .padding(vertical = 16.dp),
             shape = RoundedCornerShape(32.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(
                 modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Official Weather Briefing",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                
+                Text(
+                    text = location.ifBlank { "Current Conditions" },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // 1. Official NWS Detailed Summaries (Today & Tonight)
+                val todayPeriod = dailyForecast.getOrNull(0)
+                val tonightPeriod = dailyForecast.getOrNull(1)
+
+                if (todayPeriod != null) {
+                    BriefingSection(
+                        title = todayPeriod.name ?: "Today",
+                        summary = todayPeriod.detailedForecast ?: "No summary available.",
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    )
+                }
+
+                if (tonightPeriod != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    BriefingSection(
+                        title = tonightPeriod.name ?: "Tonight",
+                        summary = tonightPeriod.detailedForecast ?: "No summary available.",
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                // 2. Weather Visuals
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    WeatherIcon(condition = weatherValues?.condition ?: "N/A", size = 80.dp, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(20.dp))
+                    Column {
+                        Text(
+                            text = if (weatherValues?.temperature != null) "${weatherValues.temperature.toInt()}°" else "--°",
+                            style = MaterialTheme.typography.displayLarge,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = weatherValues?.condition ?: "N/A",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+                HorizontalDivider(thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // 3. Technical Stats Grid
+                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        StatItem(
+                            icon = Icons.Default.WaterDrop,
+                            label = "Humidity",
+                            value = "${weatherValues?.humidity?.toInt() ?: "N/A"}%",
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatItem(
+                            icon = Icons.Default.Air,
+                            label = "Wind Speed",
+                            value = "${weatherValues?.windSpeed?.toInt() ?: "N/A"} mph",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        StatItem(
+                            icon = Icons.Default.WbSunny,
+                            label = "Sunrise",
+                            value = weatherValues?.sunrise ?: "N/A",
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatItem(
+                            icon = Icons.Default.WbTwilight,
+                            label = "Sunset",
+                            value = weatherValues?.sunset ?: "N/A",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        StatItem(
+                            icon = Icons.Default.Cloud,
+                            label = "AQI Index",
+                            value = weatherValues?.aqi?.toString() ?: "N/A",
+                            modifier = Modifier.weight(1f)
+                        )
+                        val rainProb = nextRainTime?.split("|")?.getOrNull(1) ?: "--"
+                        StatItem(
+                            icon = Icons.Default.WaterDrop,
+                            label = "Rain Chance",
+                            value = if (rainProb != "--") "$rainProb%" else "N/A",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // 4. Detailed Rain Timing
+                if (nextRainTime != null) {
+                    val parts = nextRainTime.split("|")
+                    val timeRaw = parts[0]
+                    val prob = parts.getOrNull(1) ?: "0"
+                    
+                    val formattedTime = try {
+                        val dt = ZonedDateTime.parse(timeRaw)
+                        val now = ZonedDateTime.now()
+                        val isToday = dt.toLocalDate() == now.toLocalDate()
+                        val timeOnly = dt.format(DateTimeFormatter.ofPattern("h:mm a"))
+                        if (isToday) "today at $timeOnly" else dt.format(DateTimeFormatter.ofPattern("EEE 'at' h:mm a"))
+                    } catch (e: Exception) { "soon" }
+
+                    val action = if (isCurrentlyRaining) "end" else "begin"
+                    
+                    Spacer(modifier = Modifier.height(28.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Rain expected to $action $formattedTime with a $prob% chance.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                Button(
+                    onClick = onDismiss, 
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Close Full Report")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BriefingSection(title: String, summary: String, color: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+            .padding(20.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodyMedium,
+            lineHeight = 22.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+fun ForecastDetailDialog(period: ForecastPeriod, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.85f)
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(32.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
                     .padding(24.dp)
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -524,7 +744,7 @@ fun CurrentWeatherHero(
     weatherValues: WeatherValues?,
     nextRainTime: String?,
     isCurrentlyRaining: Boolean,
-    onElementClick: (String, String) -> Unit
+    onClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
     
@@ -540,6 +760,7 @@ fun CurrentWeatherHero(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
+        onClick = onClick,
         shape = RoundedCornerShape(32.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
@@ -555,10 +776,7 @@ fun CurrentWeatherHero(
                 style = MaterialTheme.typography.headlineSmall,
                 color = textColor,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.clickable { 
-                    onElementClick("Location", "Current monitored location: $location.")
-                }
+                textAlign = TextAlign.Center
             )
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -566,10 +784,7 @@ fun CurrentWeatherHero(
             WeatherIcon(
                 condition = weatherValues?.condition ?: "N/A",
                 size = 100.dp,
-                tint = textColor,
-                modifier = Modifier.clickable {
-                    onElementClick("Conditions", "Sky state: ${weatherValues?.condition ?: "Unknown"}.\nAQI: ${weatherValues?.aqi ?: "N/A"}")
-                }
+                tint = textColor
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -580,10 +795,7 @@ fun CurrentWeatherHero(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 80.sp
                 ),
-                color = textColor,
-                modifier = Modifier.clickable {
-                    onElementClick("Temperature", "Current: ${weatherValues?.temperature?.toInt()}°\nHumidity: ${weatherValues?.humidity?.toInt()}%\nWind: ${weatherValues?.windSpeed?.toInt()} mph")
-                }
+                color = textColor
             )
             Text(
                 text = weatherValues?.condition ?: "N/A",
@@ -602,8 +814,12 @@ fun CurrentWeatherHero(
             }
 
             if (nextRainTime != null) {
+                val parts = nextRainTime.split("|")
+                val timeRaw = parts[0]
+                val prob = parts.getOrNull(1) ?: "0"
+
                 val formattedTime = try {
-                    val dt = ZonedDateTime.parse(nextRainTime)
+                    val dt = ZonedDateTime.parse(timeRaw)
                     val now = ZonedDateTime.now()
                     val isToday = dt.toLocalDate() == now.toLocalDate()
                     val isTomorrow = dt.toLocalDate() == now.plusDays(1).toLocalDate()
@@ -618,24 +834,15 @@ fun CurrentWeatherHero(
                         dt.format(DateTimeFormatter.ofPattern("EEE 'at' h:mm a"))
                     }
                 } catch (e: Exception) {
-                    ConsoleManager.logError("AlertsScreen", "Hero card time parsing error", e)
                     "soon"
                 }
 
-                val actionText = if (isCurrentlyRaining) "expected to end" else "expected to begin"
+                val actionText = if (isCurrentlyRaining) "to end" else "to begin"
 
                 Spacer(modifier = Modifier.height(24.dp))
                 Surface(
                     color = infoSurfaceColor,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.clickable {
-                        val msg = if (isCurrentlyRaining) {
-                            "Rain is expected to end $formattedTime."
-                        } else {
-                            "Rain is expected to begin $formattedTime."
-                        }
-                        onElementClick("Rain Watch", msg)
-                    }
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
@@ -649,7 +856,7 @@ fun CurrentWeatherHero(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Rain $actionText $formattedTime",
+                            text = "Rain $actionText $formattedTime ($prob%)",
                             color = textColor,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold
@@ -940,37 +1147,15 @@ fun WeatherIcon(
 }
 
 @Composable
-fun DetailDialog(title: String, description: String, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(text = title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(text = description, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge)
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text("Close")
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun AlertDetailDialog(alert: WeatherEvent, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.9f)
                 .padding(vertical = 16.dp),
             shape = RoundedCornerShape(32.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)

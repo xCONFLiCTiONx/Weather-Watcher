@@ -30,7 +30,7 @@ class WeatherAlertWorker(
                 notificationHelper.showNotification(
                     title = "📍 Tracking active",
                     message = "Location updated to $newLocation. Monitoring local hazards.",
-                    isEmergency = false
+                    channelId = NotificationHelper.CHANNEL_GENERAL_ID
                 )
             }
         } catch (e: Exception) {
@@ -58,7 +58,7 @@ class WeatherAlertWorker(
                     notificationHelper.showNotification(
                         title = "Weather Update",
                         message = "Current conditions: $condition $verb currently in progress.",
-                        isEmergency = false
+                        channelId = NotificationHelper.CHANNEL_GENERAL_ID
                     )
                 }
             }
@@ -75,7 +75,10 @@ class WeatherAlertWorker(
                     val isRain = it.shortForecast?.contains("Rain", ignoreCase = true) == true ||
                                  it.shortForecast?.contains("Showers", ignoreCase = true) == true ||
                                  it.shortForecast?.contains("Drizzle", ignoreCase = true) == true ||
-                                 it.shortForecast?.contains("Thunderstorm", ignoreCase = true) == true
+                                 it.shortForecast?.contains("Thunderstorm", ignoreCase = true) == true ||
+                                 it.shortForecast?.contains("Precipitation", ignoreCase = true) == true ||
+                                 it.shortForecast?.contains("Sleet", ignoreCase = true) == true ||
+                                 it.shortForecast?.contains("Snow", ignoreCase = true) == true
                     
                     val endTime = ZonedDateTime.parse(it.endTime)
                     prob > 20 && isRain && endTime.isAfter(ZonedDateTime.now())
@@ -107,8 +110,18 @@ class WeatherAlertWorker(
                             notificationHelper.showNotification(
                                 title = title,
                                 message = message,
-                                isEmergency = false
+                                channelId = NotificationHelper.CHANNEL_RAIN_ID,
+                                notificationId = NotificationHelper.RAIN_NOTIFICATION_ID
                             )
+                        }
+
+                        // Always update the stop time while rain is active/imminent to maintain the 3-hour silence rule
+                        try {
+                            val stopTime = ZonedDateTime.parse(nextRain.endTime).toInstant().toEpochMilli()
+                            repository.saveLastRainStopTime(stopTime)
+                        } catch (e: Exception) {
+                            // If parsing fails, just use current time as a fallback
+                            repository.saveLastRainStopTime(System.currentTimeMillis())
                         }
                     }
                 }
@@ -140,6 +153,7 @@ class WeatherAlertWorker(
                     notificationHelper.showNotification(
                         title = "${if (isLocal) "📍" else "⚠️"} ${event.title}",
                         message = "$summary\n\nSource: ${if (isLocal) "Local Community" else "NWS"}",
+                        channelId = if (isLocal) NotificationHelper.CHANNEL_LOCAL_ID else NotificationHelper.CHANNEL_SEVERE_ID,
                         isEmergency = isEmergency
                     )
                 }

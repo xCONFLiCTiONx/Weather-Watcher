@@ -77,13 +77,25 @@ class MainActivity : ComponentActivity() {
                     composable("alerts") {
                         AlertsScreen(
                             viewModel = viewModel,
-                            onNavigateToSettings = { navController.navigate("settings") }
+                            onNavigateToSettings = { 
+                                // Prevent redundant screens
+                                if (navController.currentDestination?.route != "settings") {
+                                    navController.navigate("settings") {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            }
                         )
                     }
                     composable("settings") {
                         SettingsScreen(
                             viewModel = viewModel,
-                            onNavigateBack = { navController.popBackStack() }
+                            onNavigateBack = { 
+                                // Safe pop to avoid gray screen
+                                if (navController.currentDestination?.route == "settings") {
+                                    navController.popBackStack()
+                                }
+                            }
                         )
                     }
                 }

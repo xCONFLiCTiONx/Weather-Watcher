@@ -45,10 +45,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private val _currentWeather = MutableStateFlow(repository.getLastWeather())
     val currentWeather: StateFlow<WeatherValues?> = _currentWeather
 
-    private val _hourlyForecast = MutableStateFlow<List<ForecastPeriod>>(emptyList())
+    private val _hourlyForecast = MutableStateFlow(repository.getLastHourlyForecast())
     val hourlyForecast: StateFlow<List<ForecastPeriod>> = _hourlyForecast
 
-    private val _dailyForecast = MutableStateFlow<List<ForecastPeriod>>(emptyList())
+    private val _dailyForecast = MutableStateFlow(repository.getLastDailyForecast())
     val dailyForecast: StateFlow<List<ForecastPeriod>> = _dailyForecast
 
     private val _pollenData = MutableStateFlow<PollenData?>(null)
@@ -105,7 +105,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     val consoleLogs = ConsoleManager.logs
 
     init {
-        refreshWeather()
+        refreshWeather(isManual = false)
         startWeatherWork()
         updateBatteryOptimizationStatus()
         startServiceHealer()
@@ -175,10 +175,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         _isIgnoringBatteryOptimizations.value = powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
 
-    fun refreshWeather() {
+    fun refreshWeather(isManual: Boolean = false) {
         updateBatteryOptimizationStatus()
         viewModelScope.launch {
-            _isRefreshing.value = true
+            if (isManual) _isRefreshing.value = true
             _errorMessage.value = null
             
             val statuses = _serviceStatuses.value.toMutableMap()
@@ -219,11 +219,13 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     if (_infrastructureAlertsEnabled.value) {
                         try {
                             val local = repository.fetchInfrastructureAlerts()
-                            // Update UI only if we have new local info, or keep combined state
-                            // For simplicity, AlertsScreen collects from _activeAlerts
-                            // So let's update combined alerts here
+                            // Smart Duplicate Filter: Merge NWS and Local alerts with similar titles
                             val nws = _activeAlerts.value.filter { !it.id.contains("infra") }
-                            _activeAlerts.value = (nws + local).distinctBy { it.title.lowercase().trim() }
+                            val combined = (nws + local).distinctBy { 
+                                // Normalize title for comparison (remove punct, lowercase)
+                                it.title.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
+                            }
+                            _activeAlerts.value = combined
                             statuses["ArcGIS Local Alerts"] = true
                         } catch (e: Exception) {
                             statuses["ArcGIS Local Alerts"] = false
@@ -232,7 +234,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
-                // 4. Forecasts (Hourly)
+                // 4. Forecasts (Hourly) & Rain Logic
                 launch {
                     try {
                         val hourly = repository.fetchForecast()
@@ -243,25 +245,33 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                                     java.time.ZonedDateTime.parse(it.endTime).isAfter(now)
                                 } catch (e: Exception) { true }
                             }
-                            _hourlyForecast.value = futureHourly.take(24)
+                            val top24 = futureHourly.take(24)
+                            _hourlyForecast.value = top24
+                            repository.saveLastHourlyForecast(top24)
                             
-                            // Process Rain Logic immediately
+                            // Process Rain Logic immediately from NWS (Source of Truth)
                             val isRainy = { period: ForecastPeriod ->
                                 val prob = period.probabilityOfPrecipitation?.value ?: 0
                                 val forecast = period.shortForecast ?: ""
                                 prob > 20 && (forecast.contains("Rain", true) || 
                                              forecast.contains("Showers", true) || 
-                                             forecast.contains("Thunderstorm", true))
+                                             forecast.contains("Thunderstorm", true) ||
+                                             forecast.contains("Drizzle", true) ||
+                                             forecast.contains("Precipitation", true) ||
+                                             forecast.contains("Sleet", true) ||
+                                             forecast.contains("Snow", true))
                             }
+
                             val nextRain = futureHourly.firstOrNull { isRainy(it) }
                             if (nextRain != null) {
                                 val startTime = java.time.ZonedDateTime.parse(nextRain.startTime)
+                                val prob = nextRain.probabilityOfPrecipitation?.value ?: 0
                                 if (startTime.isBefore(now)) {
                                     _isCurrentlyRaining.value = true
-                                    _nextRainTime.value = nextRain.endTime
+                                    _nextRainTime.value = "${nextRain.endTime}|$prob"
                                 } else {
                                     _isCurrentlyRaining.value = false
-                                    _nextRainTime.value = nextRain.startTime
+                                    _nextRainTime.value = "${nextRain.startTime}|$prob"
                                 }
                             } else {
                                 _isCurrentlyRaining.value = false
@@ -269,7 +279,6 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                             }
                         }
                     } catch (e: Exception) {
-                        // Forecast failure is non-critical for status but we can log
                         Log.w("WeatherViewModel", "Hourly forecast failed: ${e.message}")
                     }
                 }
@@ -278,7 +287,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 launch {
                     try {
                         val daily = repository.fetchDailyForecast()
-                        if (daily != null) _dailyForecast.value = daily
+                        if (daily != null) {
+                            _dailyForecast.value = daily
+                            repository.saveLastDailyForecast(daily)
+                        }
                     } catch (e: Exception) {
                         Log.w("WeatherViewModel", "Daily forecast failed: ${e.message}")
                     }
@@ -322,7 +334,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     fun updateUnits(newUnits: String) {
         _appUnits.value = newUnits
         repository.saveUnits(newUnits)
-        refreshWeather()
+        refreshWeather(isManual = false)
     }
 
     fun updateDailyReportEnabled(enabled: Boolean) {
@@ -398,7 +410,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
         _selectedAlerts.value = current
         repository.saveSelectedAlerts(current)
-        refreshWeather()
+        refreshWeather(isManual = false)
     }
 
     fun clearAllAlerts() {
@@ -406,14 +418,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         val noneSet = setOf("__NONE__")
         _selectedAlerts.value = noneSet
         repository.saveSelectedAlerts(noneSet)
-        refreshWeather()
+        refreshWeather(isManual = false)
     }
 
     fun selectAllAlerts() {
         // Return to optimized "Monitor Everything" state
         _selectedAlerts.value = emptySet()
         repository.saveSelectedAlerts(emptySet())
-        refreshWeather()
+        refreshWeather(isManual = false)
     }
 
     fun saveSettings(locationInput: String) {
@@ -423,11 +435,12 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             _location.value = repository.getDisplayName()
             
             startWeatherWork()
-            refreshWeather()
+            refreshWeather(isManual = false)
             
             notificationHelper.showNotification(
-                "Weather Service Active", 
-                "Now monitoring ${repository.getDisplayName()} for hazards and rain."
+                title = "Weather Service Active", 
+                message = "Now monitoring ${repository.getDisplayName()} for hazards and rain.",
+                channelId = NotificationHelper.CHANNEL_GENERAL_ID
             )
         }
     }
@@ -442,10 +455,11 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     repository.updateLocationFromCoords(locationResult.latitude, locationResult.longitude)
                     _location.value = repository.getDisplayName()
                     startWeatherWork()
-                    refreshWeather()
+                    refreshWeather(isManual = false)
                     notificationHelper.showNotification(
-                        "Weather Service Active", 
-                        "Detected location: ${repository.getDisplayName()}. Now monitoring for hazards."
+                        title = "Weather Service Active", 
+                        message = "Detected location: ${repository.getDisplayName()}. Now monitoring for hazards.",
+                        channelId = NotificationHelper.CHANNEL_GENERAL_ID
                     )
                 } else {
                     _errorMessage.value = "Unable to detect location."

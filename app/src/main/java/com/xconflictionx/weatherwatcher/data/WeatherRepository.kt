@@ -356,6 +356,38 @@ class WeatherRepository(private val context: Context) {
         }
     }
 
+    fun saveLastHourlyForecast(periods: List<ForecastPeriod>) {
+        if (periods.isNotEmpty()) {
+            val jsonString = json.encodeToString(periods)
+            sharedPrefs.edit().putString("last_hourly_forecast", jsonString).apply()
+        }
+    }
+
+    fun getLastHourlyForecast(): List<ForecastPeriod> {
+        val jsonString = sharedPrefs.getString("last_hourly_forecast", null) ?: return emptyList()
+        return try {
+            json.decodeFromString(jsonString)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveLastDailyForecast(periods: List<ForecastPeriod>) {
+        if (periods.isNotEmpty()) {
+            val jsonString = json.encodeToString(periods)
+            sharedPrefs.edit().putString("last_daily_forecast", jsonString).apply()
+        }
+    }
+
+    fun getLastDailyForecast(): List<ForecastPeriod> {
+        val jsonString = sharedPrefs.getString("last_daily_forecast", null) ?: return emptyList()
+        return try {
+            json.decodeFromString(jsonString)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun saveLastBackgroundSyncTime(time: Long) {
         sharedPrefs.edit().putLong("last_background_sync_time", time).apply()
     }
@@ -377,13 +409,25 @@ class WeatherRepository(private val context: Context) {
     }
 
     fun shouldNotifyForRainPeriod(startTime: String): Boolean {
+        val now = System.currentTimeMillis()
+        val lastRainStop = sharedPrefs.getLong("last_rain_stop_time", 0L)
+        
+        // Rule: At least 3 hours must pass since the last rain stopped
+        val threeHoursMillis = 3 * 60 * 60 * 1000L
+        val isCooldownOver = (now - lastRainStop) > threeHoursMillis
+
         val key = "notified_rain_at_$startTime"
-        val notified = sharedPrefs.getBoolean(key, false)
-        if (!notified) {
+        val notifiedForThisPeriod = sharedPrefs.getBoolean(key, false)
+
+        if (!notifiedForThisPeriod && isCooldownOver) {
             sharedPrefs.edit().putBoolean(key, true).apply()
             return true
         }
         return false
+    }
+
+    fun saveLastRainStopTime(timeMillis: Long) {
+        sharedPrefs.edit().putLong("last_rain_stop_time", timeMillis).apply()
     }
 
     fun getLastWeather(): WeatherValues? {

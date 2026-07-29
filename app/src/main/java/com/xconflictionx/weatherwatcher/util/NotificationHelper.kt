@@ -13,11 +13,22 @@ import com.xconflictionx.weatherwatcher.MainActivity
 class NotificationHelper(private val context: Context) {
 
     companion object {
-        const val CHANNEL_ALERTS_ID = "weather_alerts"
-        const val CHANNEL_ALERTS_NAME = "Severe Weather Alerts"
+        const val CHANNEL_SEVERE_ID = "severe_alerts"
+        const val CHANNEL_SEVERE_NAME = "Weather Hazards"
         
-        const val CHANNEL_INFO_ID = "weather_info"
-        const val CHANNEL_INFO_NAME = "Daily Briefing & Rain Notices"
+        const val CHANNEL_RAIN_ID = "rain_notices"
+        const val CHANNEL_RAIN_NAME = "Rain Notices"
+
+        const val CHANNEL_LOCAL_ID = "local_community"
+        const val CHANNEL_LOCAL_NAME = "Local Community Updates"
+
+        const val CHANNEL_DAILY_ID = "daily_briefing"
+        const val CHANNEL_DAILY_NAME = "Daily Briefing"
+
+        const val CHANNEL_GENERAL_ID = "general_info"
+        const val CHANNEL_GENERAL_NAME = "General System Info"
+
+        const val RAIN_NOTIFICATION_ID = 555
     }
 
     init {
@@ -29,39 +40,38 @@ class NotificationHelper(private val context: Context) {
             val notificationManager: NotificationManager =
                 context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 
-            // 1. Severe Alerts Channel (High Importance, Warning Sound)
-            val alertChannel = NotificationChannel(
-                CHANNEL_ALERTS_ID, 
-                CHANNEL_ALERTS_NAME, 
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Emergency notifications for severe weather hazards"
-            }
-            
-            // 2. Info Channel (Default Importance, Info Icon)
-            val infoChannel = NotificationChannel(
-                CHANNEL_INFO_ID, 
-                CHANNEL_INFO_NAME, 
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Informational updates for daily briefings and rain notices"
-            }
+            val channels = listOf(
+                NotificationChannel(CHANNEL_SEVERE_ID, CHANNEL_SEVERE_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Emergency notifications for severe weather hazards (warnings/watches)"
+                },
+                NotificationChannel(CHANNEL_RAIN_ID, CHANNEL_RAIN_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Notifications for upcoming or starting precipitation"
+                },
+                NotificationChannel(CHANNEL_LOCAL_ID, CHANNEL_LOCAL_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Updates from local municipal feeds and road infrastructure"
+                },
+                NotificationChannel(CHANNEL_DAILY_ID, CHANNEL_DAILY_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Your morning weather and air quality summary"
+                },
+                NotificationChannel(CHANNEL_GENERAL_ID, CHANNEL_GENERAL_NAME, NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Non-critical system notes and location detection confirmations"
+                }
+            )
 
-            notificationManager.createNotificationChannel(alertChannel)
-            notificationManager.createNotificationChannel(infoChannel)
+            notificationManager.createNotificationChannels(channels)
         }
     }
 
     fun showNotification(
         title: String, 
         message: String, 
-        isEmergency: Boolean = true,
-        iconRes: Int? = null
+        channelId: String,
+        isEmergency: Boolean = false,
+        iconRes: Int? = null,
+        notificationId: Int? = null
     ) {
-        val channelId = if (isEmergency) CHANNEL_ALERTS_ID else CHANNEL_INFO_ID
         val priority = if (isEmergency) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT
         
-        // Use provided icon, or default to alert/info icons
         val finalIcon = iconRes ?: if (isEmergency) {
             android.R.drawable.ic_dialog_alert
         } else {
@@ -88,9 +98,11 @@ class NotificationHelper(private val context: Context) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(message))
         }
 
+        val id = notificationId ?: System.currentTimeMillis().toInt()
+
         with(NotificationManagerCompat.from(context)) {
             try {
-                notify(System.currentTimeMillis().toInt(), builder.build())
+                notify(id, builder.build())
             } catch (e: SecurityException) {
                 ConsoleManager.logError("NotificationHelper", "Notification permission missing", e)
             } catch (e: Exception) {
