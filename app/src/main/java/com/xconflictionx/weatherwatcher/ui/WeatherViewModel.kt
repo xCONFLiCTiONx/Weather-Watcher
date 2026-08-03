@@ -99,6 +99,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private val _localFeeds = MutableStateFlow<List<ArcgisItem>>(emptyList())
     val localFeeds: StateFlow<List<ArcgisItem>> = _localFeeds
 
+    fun isUsLocation(): Boolean = repository.isUsLocation()
+
     private val _serviceStatuses = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val serviceStatuses: StateFlow<Map<String, Boolean>> = _serviceStatuses
 
@@ -131,11 +133,23 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                             launch {
                                 try {
                                     val success = when (serviceName) {
-                                        "National Weather Service" -> {
+                                        "NWS Forecasts" -> {
+                                            val hourly = repository.fetchForecast()
+                                            if (hourly != null) {
+                                                _hourlyForecast.value = hourly
+                                                true
+                                            } else false
+                                        }
+                                        "NWS Severe Alerts" -> {
                                             val alerts = repository.fetchAlerts()
-                                            // Recovery is successful if we get any result (even empty list) without exception
                                             _activeAlerts.value = alerts
                                             true
+                                        }
+                                        "Regional Safety" -> {
+                                            if (_regionalSafetyEnabled.value) {
+                                                repository.fetchAlerts()
+                                                true
+                                            } else true
                                         }
                                         "Open-Meteo (AQI/Sun)" -> {
                                             val weather = repository.fetchCurrentWeather()
@@ -144,7 +158,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                                                 true
                                             } else false
                                         }
-                                        "ArcGIS Local Alerts" -> {
+                                        "Community Infrastructure" -> {
                                             if (_infrastructureAlertsEnabled.value) {
                                                 repository.fetchInfrastructureAlerts()
                                                 true
@@ -201,15 +215,17 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     _serviceStatuses.value = statuses.toMap()
                 }
 
-                // 2. NWS Alerts
+                // 2. NWS Alerts & Regional Safety
                 launch {
                     try {
                         val alerts = repository.fetchAlerts()
-                        statuses["National Weather Service"] = true
+                        statuses["NWS Severe Alerts"] = true
+                        statuses["Regional Safety"] = true
                         _activeAlerts.value = alerts
                         repository.saveLastAlerts(alerts)
                     } catch (e: Exception) {
-                        statuses["National Weather Service"] = false
+                        statuses["NWS Severe Alerts"] = false
+                        statuses["Regional Safety"] = false
                     }
                     _serviceStatuses.value = statuses.toMap()
                 }
@@ -219,17 +235,18 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     if (_infrastructureAlertsEnabled.value) {
                         try {
                             val local = repository.fetchInfrastructureAlerts()
-                            // Smart Duplicate Filter: Merge NWS and Local alerts with similar titles
                             val nws = _activeAlerts.value.filter { !it.id.contains("infra") }
                             val combined = (nws + local).distinctBy { 
-                                // Normalize title for comparison (remove punct, lowercase)
                                 it.title.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
                             }
                             _activeAlerts.value = combined
-                            statuses["ArcGIS Local Alerts"] = true
+                            statuses["Community Infrastructure"] = true
                         } catch (e: Exception) {
-                            statuses["ArcGIS Local Alerts"] = false
+                            statuses["Community Infrastructure"] = false
                         }
+                        _serviceStatuses.value = statuses.toMap()
+                    } else {
+                        statuses["Community Infrastructure"] = true
                         _serviceStatuses.value = statuses.toMap()
                     }
                 }
@@ -239,6 +256,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     try {
                         val hourly = repository.fetchForecast()
                         if (hourly != null) {
+                            statuses["NWS Forecasts"] = true
                             val now = java.time.ZonedDateTime.now()
                             val futureHourly = hourly.filter { 
                                 try {
@@ -277,10 +295,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                                 _isCurrentlyRaining.value = false
                                 _nextRainTime.value = null
                             }
+                        } else {
+                            statuses["NWS Forecasts"] = false
                         }
                     } catch (e: Exception) {
+                        statuses["NWS Forecasts"] = false
                         Log.w("WeatherViewModel", "Hourly forecast failed: ${e.message}")
                     }
+                    _serviceStatuses.value = statuses.toMap()
                 }
 
                 // 5. Daily Forecast
@@ -296,7 +318,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
-                // 6. Pollen
+                // 6. Pollen (Non-Critical)
                 launch {
                     try {
                         val pollen = repository.fetchPollenData()

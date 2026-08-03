@@ -133,6 +133,16 @@ class WeatherRepository(private val context: Context) {
         return if (lat != null && lon != null) "$lat,$lon" else null
     }
 
+    fun isUsLocation(): Boolean {
+        val coords = getCoordinates() ?: return false
+        val parts = coords.split(",").mapNotNull { it.toDoubleOrNull() }
+        if (parts.size != 2) return false
+        val lat = parts[0]
+        val lon = parts[1]
+        // Approx bounding box for USA (Conterminous + AK + HI)
+        return (lat in 18.0..72.0) && (lon in -170.0..-66.0)
+    }
+
     suspend fun resolveCityName(input: String): String = withContext(Dispatchers.IO) {
         val geocoder = Geocoder(context, Locale.getDefault())
         try {

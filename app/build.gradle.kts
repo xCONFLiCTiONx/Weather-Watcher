@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.serialization)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.lottie.compose)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

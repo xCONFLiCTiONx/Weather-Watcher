@@ -136,28 +136,34 @@ fun SettingsScreen(
             contentPadding = PaddingValues(vertical = 20.dp)
         ) {
             // 1. System Permissions
-            item {
-                SettingsSection(title = "System Permissions", icon = Icons.Default.AdminPanelSettings) {
-                    PermissionCards(
-                        isIgnoringBatteryOptimizations,
-                        backgroundLocationGranted,
-                        notificationPermissionGranted,
-                        onBatteryClick = { viewModel.openBatteryOptimizationSettings(context) },
-                        onLocationClick = {
-                            if (!backgroundLocationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            val showPermissions = !isIgnoringBatteryOptimizations || !backgroundLocationGranted || !notificationPermissionGranted
+            if (showPermissions) {
+                item {
+                    SettingsSection(title = "System Permissions", icon = Icons.Default.AdminPanelSettings) {
+                        PermissionCards(
+                            isIgnoringBatteryOptimizations,
+                            backgroundLocationGranted,
+                            notificationPermissionGranted,
+                            onBatteryClick = { viewModel.openBatteryOptimizationSettings(context) },
+                            onLocationClick = {
+                                if (!backgroundLocationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
+                item { HorizontalDivider() }
             }
-
-            item { HorizontalDivider() }
 
             // 2. Service Status
             item {
                 SettingsSection(title = "Service Status", icon = Icons.Default.CloudSync) {
-                    ServiceStatusDashboard(serviceStatuses)
+                    ServiceStatusDashboard(
+                        statuses = serviceStatuses,
+                        infraEnabled = infrastructureAlertsEnabled,
+                        regionalEnabled = regionalSafetyEnabled
+                    )
                 }
             }
 
@@ -343,38 +349,58 @@ fun PermissionCards(
     onLocationClick: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedCard(
-            onClick = onBatteryClick,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.outlinedCardColors(
-                containerColor = if (isIgnoringBattery) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
-            )
-        ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = if (isIgnoringBattery) Icons.Default.CheckCircle else Icons.Default.BatteryAlert, contentDescription = null, tint = if (isIgnoringBattery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(text = if (isIgnoringBattery) "Battery: Unrestricted" else "Battery: Optimized (Restricted)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                    Text(text = if (isIgnoringBattery) "App will always run in background." else "Tap to change to 'Don't Optimize'.", style = MaterialTheme.typography.labelSmall)
+        if (!isIgnoringBattery) {
+            OutlinedCard(
+                onClick = onBatteryClick,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.outlinedCardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
+                )
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.BatteryAlert, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(text = "Battery: Optimized (Restricted)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                        Text(text = "Phone may sleep app. Tap to change to 'Don't Optimize'.", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
 
-        OutlinedCard(
-            onClick = onLocationClick,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.outlinedCardColors(
-                containerColor = if (bgLocationGranted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
-            )
-        ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = if (bgLocationGranted) Icons.Default.GpsFixed else Icons.Default.GpsOff, contentDescription = null, tint = if (bgLocationGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(text = if (bgLocationGranted) "Location: All the time" else "Location: While using only", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                    Text(text = if (bgLocationGranted) "24/7 monitoring active." else "Tap to change to 'Allow all the time'.", style = MaterialTheme.typography.labelSmall)
+        if (!bgLocationGranted) {
+            OutlinedCard(
+                onClick = onLocationClick,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.outlinedCardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
+                )
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.GpsOff, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(text = "Location: While using only", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                        Text(text = "Tap to change to 'Allow all the time' for 24/7 monitoring.", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        if (!notificationGranted) {
+            OutlinedCard(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.outlinedCardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
+                )
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.NotificationsOff, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(text = "Notifications are disabled. Enable in system settings.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -382,18 +408,49 @@ fun PermissionCards(
 }
 
 @Composable
-fun ServiceStatusDashboard(statuses: Map<String, Boolean>) {
+fun ServiceStatusDashboard(
+    statuses: Map<String, Boolean>, 
+    infraEnabled: Boolean, 
+    regionalEnabled: Boolean
+) {
     OutlinedCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), shape = RoundedCornerShape(12.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("National Weather Service", "Open-Meteo (AQI/Sun)", "ArcGIS Local Alerts").forEach { service ->
+            val services = listOf(
+                "NWS Forecasts",
+                "NWS Severe Alerts",
+                "Regional Safety",
+                "Open-Meteo (AQI/Sun)",
+                "Community Infrastructure"
+            )
+            
+            services.forEach { service ->
+                val isEnabled = when (service) {
+                    "Community Infrastructure" -> infraEnabled
+                    "Regional Safety" -> regionalEnabled
+                    else -> true
+                }
+                
                 val isConnected = statuses[service] ?: true
+                
+                val statusLabel = when {
+                    !isEnabled -> "Disabled"
+                    isConnected -> "Connected"
+                    else -> "Failed"
+                }
+                
+                val statusColor = when {
+                    !isEnabled -> Color.Gray
+                    isConnected -> Color(0xFF4CAF50)
+                    else -> Color(0xFFF44336)
+                }
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(text = service, style = MaterialTheme.typography.bodyMedium)
-                    Surface(color = (if (isConnected) Color(0xFF4CAF50) else Color(0xFFF44336)).copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                    Surface(color = statusColor.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
                         Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(8.dp).background(if (isConnected) Color(0xFF4CAF50) else Color(0xFFF44336), androidx.compose.foundation.shape.CircleShape))
+                            Box(modifier = Modifier.size(8.dp).background(statusColor, androidx.compose.foundation.shape.CircleShape))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = if (isConnected) "Connected" else "Failed", style = MaterialTheme.typography.labelSmall, color = if (isConnected) Color(0xFF4CAF50) else Color(0xFFF44336), fontWeight = FontWeight.Bold)
+                            Text(text = statusLabel, style = MaterialTheme.typography.labelSmall, color = statusColor, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

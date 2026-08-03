@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,6 +51,7 @@ fun AlertsScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val isCurrentlyRaining by viewModel.isCurrentlyRaining.collectAsState()
+    val trackWeatherEnabled by viewModel.trackWeatherEnabled.collectAsState()
 
     var selectedAlert by remember { mutableStateOf<WeatherEvent?>(null) }
     var selectedForecast by remember { mutableStateOf<ForecastPeriod?>(null) }
@@ -113,6 +115,8 @@ fun AlertsScreen(
                     weatherValues = currentWeather,
                     nextRainTime = nextRainTime,
                     isCurrentlyRaining = isCurrentlyRaining,
+                    trackWeatherEnabled = trackWeatherEnabled,
+                    onTrackToggle = { viewModel.updateTrackWeatherEnabled(it) },
                     onClick = { showMainDetails = true }
                 )
             }
@@ -744,6 +748,8 @@ fun CurrentWeatherHero(
     weatherValues: WeatherValues?,
     nextRainTime: String?,
     isCurrentlyRaining: Boolean,
+    trackWeatherEnabled: Boolean,
+    onTrackToggle: (Boolean) -> Unit,
     onClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
@@ -765,113 +771,160 @@ fun CurrentWeatherHero(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = location.ifBlank { "Resolving..." },
-                style = MaterialTheme.typography.headlineSmall,
-                color = textColor,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            WeatherIcon(
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // Animated Weather Background Layer (Matches Card Size Exactly)
+            WeatherBackground(
                 condition = weatherValues?.condition ?: "N/A",
-                size = 100.dp,
-                tint = textColor
+                modifier = Modifier.matchParentSize()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Text(
-                text = if (weatherValues?.temperature != null) "${weatherValues.temperature.toInt()}°" else "--°",
-                style = MaterialTheme.typography.displayLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 80.sp
-                ),
-                color = textColor
-            )
-            Text(
-                text = weatherValues?.condition ?: "N/A",
-                style = MaterialTheme.typography.titleLarge,
-                color = subTextColor,
-                fontWeight = FontWeight.Medium
-            )
-
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                SunTime(label = "Sunrise", time = weatherValues?.sunrise, icon = Icons.Default.WbTwilight, color = textColor)
-                SunTime(label = "Sunset", time = weatherValues?.sunset, icon = Icons.Default.WbTwilight, color = textColor)
-            }
-
-            if (nextRainTime != null) {
-                val parts = nextRainTime.split("|")
-                val timeRaw = parts[0]
-                val prob = parts.getOrNull(1) ?: "0"
-
-                val formattedTime = try {
-                    val dt = ZonedDateTime.parse(timeRaw)
-                    val now = ZonedDateTime.now()
-                    val isToday = dt.toLocalDate() == now.toLocalDate()
-                    val isTomorrow = dt.toLocalDate() == now.plusDays(1).toLocalDate()
-                    
-                    val timeOnly = dt.format(DateTimeFormatter.ofPattern("h:mm a"))
-                    
-                    if (isToday) {
-                        "today at $timeOnly"
-                    } else if (isTomorrow) {
-                        "tomorrow at $timeOnly"
-                    } else {
-                        dt.format(DateTimeFormatter.ofPattern("EEE 'at' h:mm a"))
-                    }
-                } catch (e: Exception) {
-                    "soon"
-                }
-
-                val actionText = if (isCurrentlyRaining) "to end" else "to begin"
-
-                Spacer(modifier = Modifier.height(24.dp))
-                Surface(
-                    color = infoSurfaceColor,
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WaterDrop,
-                            contentDescription = null,
-                            tint = if (isCurrentlyRaining) Color(0xFF03A9F4) else textColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Rain $actionText $formattedTime ($prob%)",
-                            color = textColor,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-            }
-
-            weatherValues?.lastUpdated?.let {
-                Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Updated: $it",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = subTextColor.copy(alpha = 0.5f)
+                    text = location.ifBlank { "Resolving..." },
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = textColor,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
                 )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                WeatherIcon(
+                    condition = weatherValues?.condition ?: "N/A",
+                    size = 100.dp,
+                    tint = textColor
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = if (weatherValues?.temperature != null) "${weatherValues.temperature.toInt()}°" else "--°",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 80.sp
+                    ),
+                    color = textColor
+                )
+                Text(
+                    text = weatherValues?.condition ?: "N/A",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = subTextColor,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Row(
+                    modifier = Modifier.padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SunTime(label = "Sunrise", time = weatherValues?.sunrise, icon = Icons.Default.WbTwilight, color = textColor)
+                    SunTime(label = "Sunset", time = weatherValues?.sunset, icon = Icons.Default.WbTwilight, color = textColor)
+                }
+
+                if (nextRainTime != null) {
+                    val parts = nextRainTime.split("|")
+                    val timeRaw = parts[0]
+                    val prob = parts.getOrNull(1) ?: "0"
+
+                    val formattedTime = try {
+                        val dt = ZonedDateTime.parse(timeRaw)
+                        val now = ZonedDateTime.now()
+                        val isToday = dt.toLocalDate() == now.toLocalDate()
+                        val isTomorrow = dt.toLocalDate() == now.plusDays(1).toLocalDate()
+                        
+                        val timeOnly = dt.format(DateTimeFormatter.ofPattern("h:mm a"))
+                        
+                        if (isToday) {
+                            "today at $timeOnly"
+                        } else if (isTomorrow) {
+                            "tomorrow at $timeOnly"
+                        } else {
+                            dt.format(DateTimeFormatter.ofPattern("EEE 'at' h:mm a"))
+                        }
+                    } catch (e: Exception) {
+                        "soon"
+                    }
+
+                    val actionText = if (isCurrentlyRaining) "to end" else "to begin"
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Surface(
+                        color = infoSurfaceColor,
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WaterDrop,
+                                contentDescription = null,
+                                tint = if (isCurrentlyRaining) Color(0xFF03A9F4) else textColor,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Rain $actionText $formattedTime ($prob%)",
+                                color = textColor,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                // Track Weather Toggle inside the card
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .background(infoSurfaceColor, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clickable(enabled = false) { } // Prevent card click through
+                ) {
+                    Text(
+                        text = "Track Weather",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = trackWeatherEnabled,
+                        onCheckedChange = { onTrackToggle(it) },
+                        thumbContent = {
+                            if (trackWeatherEnabled) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(SwitchDefaults.IconSize)
+                                )
+                            }
+                        },
+                        modifier = Modifier.scale(0.8f),
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = textColor,
+                            checkedTrackColor = textColor.copy(alpha = 0.5f),
+                            uncheckedThumbColor = textColor.copy(alpha = 0.5f),
+                            uncheckedTrackColor = textColor.copy(alpha = 0.2f)
+                        )
+                    )
+                }
+
+                weatherValues?.lastUpdated?.let {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Updated: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = subTextColor.copy(alpha = 0.5f)
+                    )
+                }
             }
         }
     }
