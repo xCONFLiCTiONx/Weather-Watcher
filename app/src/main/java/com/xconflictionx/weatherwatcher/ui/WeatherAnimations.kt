@@ -43,8 +43,8 @@ fun LottieWeatherAnimation(resId: Int, modifier: Modifier = Modifier) {
         composition = composition,
         progress = { progress },
         modifier = modifier
-            .alpha(0.1f), // 50% dimmer than before (10% total opacity)
-        contentScale = ContentScale.Crop, // This ensures "Fill, Not Stretch" (Crops edges)
-        alignment = androidx.compose.ui.Alignment.Center // Keeps the focus in the middle
+            .alpha(0.10f), // Set to 15% opacity for a balanced subtle effect
+        contentScale = ContentScale.Crop, // Filled to the edges without stretching (aspect ratio maintained)
+        alignment = androidx.compose.ui.Alignment.Center
     )
 }
