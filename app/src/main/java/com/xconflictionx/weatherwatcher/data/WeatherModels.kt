@@ -180,6 +180,7 @@ data class WeatherValues(
     val rainProbability: Int? = null,
     val sunrise: String? = null,
     val sunset: String? = null,
+    val isDay: Boolean = true,
     val aqi: Int? = null,
     val aqiForecast: List<AqiDayInfo> = emptyList()
 )

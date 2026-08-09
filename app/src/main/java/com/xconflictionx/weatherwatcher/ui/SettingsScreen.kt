@@ -60,8 +60,34 @@ fun SettingsScreen(
     var locationInput by remember { mutableStateOf(location) }
     LaunchedEffect(location) { if (location.isNotBlank() && locationInput.isBlank()) locationInput = location }
 
-    var notificationPermissionGranted by remember { mutableStateOf(true) }
-    var backgroundLocationGranted by remember { mutableStateOf(true) }
+    var notificationPermissionGranted by remember { 
+        mutableStateOf(
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
+    var foregroundLocationGranted by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var backgroundLocationGranted by remember { 
+        mutableStateOf(
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
     var searchQuery by remember { mutableStateOf("") }
     var consoleExpanded by remember { mutableStateOf(false) }
 
@@ -72,6 +98,12 @@ fun SettingsScreen(
                 android.Manifest.permission.POST_NOTIFICATIONS
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         }
+        
+        foregroundLocationGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             backgroundLocationGranted = androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
@@ -136,17 +168,25 @@ fun SettingsScreen(
             contentPadding = PaddingValues(vertical = 20.dp)
         ) {
             // 1. System Permissions
-            val showPermissions = !isIgnoringBatteryOptimizations || !backgroundLocationGranted || !notificationPermissionGranted
+            val showPermissions = !isIgnoringBatteryOptimizations || !foregroundLocationGranted || !backgroundLocationGranted || !notificationPermissionGranted
             if (showPermissions) {
                 item {
                     SettingsSection(title = "System Permissions", icon = Icons.Default.AdminPanelSettings) {
                         PermissionCards(
-                            isIgnoringBatteryOptimizations,
-                            backgroundLocationGranted,
-                            notificationPermissionGranted,
+                            isIgnoringBattery = isIgnoringBatteryOptimizations,
+                            fgLocationGranted = foregroundLocationGranted,
+                            bgLocationGranted = backgroundLocationGranted,
+                            notificationGranted = notificationPermissionGranted,
                             onBatteryClick = { viewModel.openBatteryOptimizationSettings(context) },
                             onLocationClick = {
-                                if (!backgroundLocationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                if (!foregroundLocationGranted) {
+                                    permissionLauncher.launch(
+                                        arrayOf(
+                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                } else if (!backgroundLocationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                                     backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                                 }
                             }
@@ -343,6 +383,7 @@ fun SettingsScreen(
 @Composable
 fun PermissionCards(
     isIgnoringBattery: Boolean,
+    fgLocationGranted: Boolean,
     bgLocationGranted: Boolean,
     notificationGranted: Boolean,
     onBatteryClick: () -> Unit,
@@ -369,7 +410,10 @@ fun PermissionCards(
             }
         }
 
-        if (!bgLocationGranted) {
+        if (!fgLocationGranted || !bgLocationGranted) {
+            val title = if (!fgLocationGranted) "Location: Disabled" else "Location: While using only"
+            val sub = if (!fgLocationGranted) "Tap to grant basic location access." else "Tap to change to 'Allow all the time' for 24/7 monitoring."
+            
             OutlinedCard(
                 onClick = onLocationClick,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -382,8 +426,8 @@ fun PermissionCards(
                     Icon(imageVector = Icons.Default.GpsOff, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
-                        Text(text = "Location: While using only", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                        Text(text = "Tap to change to 'Allow all the time' for 24/7 monitoring.", style = MaterialTheme.typography.labelSmall)
+                        Text(text = title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                        Text(text = sub, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

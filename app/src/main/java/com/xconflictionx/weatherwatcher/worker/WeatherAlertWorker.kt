@@ -44,6 +44,11 @@ class WeatherAlertWorker(
             weatherDef.await() to forecastDef.await()
         }
 
+        // Update cache
+        if (periods != null) {
+            repository.saveLastHourlyForecast(periods.take(24))
+        }
+
         // 3. Condition Change Detection
         if (currentWeather != null) {
             // If Track is ON, check for condition changes and notify
@@ -133,6 +138,9 @@ class WeatherAlertWorker(
         // 5. Consolidated Alerts (Regional & Infrastructure)
         try {
             val nwsAlerts = repository.fetchAlerts()
+            // Update cache so UI can react
+            repository.saveLastAlerts(nwsAlerts)
+
             val localAlerts = if (repository.isInfrastructureAlertsEnabled()) {
                 repository.fetchInfrastructureAlerts()
             } else emptyList()

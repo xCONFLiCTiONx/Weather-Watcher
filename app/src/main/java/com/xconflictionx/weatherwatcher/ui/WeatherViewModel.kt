@@ -1,6 +1,7 @@
 package com.xconflictionx.weatherwatcher.ui
 
 import android.app.Application
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -106,13 +107,69 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     val consoleLogs = ConsoleManager.logs
 
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "last_weather" || key == "last_alerts" || key == "last_hourly_forecast" || key == "last_daily_forecast") {
+            Log.d("WeatherViewModel", "Cache changed for $key, syncing UI...")
+            viewModelScope.launch {
+                when (key) {
+                    "last_weather" -> _currentWeather.value = repository.getLastWeather()
+                    "last_alerts" -> _activeAlerts.value = repository.getLastAlerts()
+                    "last_hourly_forecast" -> {
+                        val hourly = repository.getLastHourlyForecast()
+                        _hourlyForecast.value = hourly
+                        updateRainStatus(hourly)
+                    }
+                    "last_daily_forecast" -> _dailyForecast.value = repository.getLastDailyForecast()
+                }
+            }
+        }
+    }
+
     init {
+        repository.registerListener(prefListener)
         refreshWeather(isManual = false)
         startWeatherWork()
         updateBatteryOptimizationStatus()
         startServiceHealer()
         if (repository.isDailyReportEnabled()) {
             com.xconflictionx.weatherwatcher.worker.DailyReportWorker.scheduleNext(context, repository)
+        }
+    }
+
+    private fun updateRainStatus(hourly: List<ForecastPeriod>) {
+        val now = java.time.ZonedDateTime.now()
+        val futureHourly = hourly.filter { 
+            try {
+                java.time.ZonedDateTime.parse(it.endTime).isAfter(now)
+            } catch (e: Exception) { true }
+        }
+        
+        val isRainy = { period: ForecastPeriod ->
+            val prob = period.probabilityOfPrecipitation?.value ?: 0
+            val forecast = period.shortForecast ?: ""
+            prob > 20 && (forecast.contains("Rain", true) || 
+                         forecast.contains("Showers", true) || 
+                         forecast.contains("Thunderstorm", true) ||
+                         forecast.contains("Drizzle", true) ||
+                         forecast.contains("Precipitation", true) ||
+                         forecast.contains("Sleet", true) ||
+                         forecast.contains("Snow", true))
+        }
+
+        val nextRain = futureHourly.firstOrNull { isRainy(it) }
+        if (nextRain != null) {
+            val startTime = java.time.ZonedDateTime.parse(nextRain.startTime)
+            val prob = nextRain.probabilityOfPrecipitation?.value ?: 0
+            if (startTime.isBefore(now)) {
+                _isCurrentlyRaining.value = true
+                _nextRainTime.value = "${nextRain.endTime}|$prob"
+            } else {
+                _isCurrentlyRaining.value = false
+                _nextRainTime.value = "${nextRain.startTime}|$prob"
+            }
+        } else {
+            _isCurrentlyRaining.value = false
+            _nextRainTime.value = null
         }
     }
 
@@ -544,5 +601,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             }
             context.startActivity(intent)
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        repository.unregisterListener(prefListener)
     }
 }

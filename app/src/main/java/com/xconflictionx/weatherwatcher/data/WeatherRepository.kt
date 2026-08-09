@@ -60,6 +60,14 @@ class WeatherRepository(private val context: Context) {
             .create(ArcgisApiService::class.java)
     }
 
+    fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun unregisterListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     private suspend fun <T> retryIO(
         times: Int = 2,
         initialDelay: Long = 2000,
@@ -584,6 +592,16 @@ class WeatherRepository(private val context: Context) {
             aqiForecast.addAll(dailyDataMap.values.filter { it.maxAqi > 0 }.sortedBy { it.date })
         }
 
+        // 4. Day/Night Calculation (Fix: Using LocalTime to avoid UTC offset bugs)
+        val now = java.time.LocalDateTime.now()
+        val isDayResult = sunResponse?.daily?.let { daily ->
+            val sr = daily.sunrise.firstOrNull()?.let { java.time.LocalDateTime.parse(it) }
+            val ss = daily.sunset.firstOrNull()?.let { java.time.LocalDateTime.parse(it) }
+            if (sr != null && ss != null) {
+                now.isAfter(sr) && now.isBefore(ss)
+            } else true
+        } ?: true
+
         WeatherValues(
             temperature = temp,
             condition = obsResponse.properties.textDescription ?: "Unknown",
@@ -594,6 +612,7 @@ class WeatherRepository(private val context: Context) {
             rainProbability = rainProb,
             sunrise = sunrise,
             sunset = sunset,
+            isDay = isDayResult,
             aqi = aqiValue,
             aqiForecast = aqiForecast.sortedBy { it.date }
         )

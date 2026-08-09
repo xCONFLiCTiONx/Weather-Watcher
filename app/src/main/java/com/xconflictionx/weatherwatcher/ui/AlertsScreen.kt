@@ -775,6 +775,7 @@ fun CurrentWeatherHero(
             // Animated Weather Background Layer (Matches Card Size Exactly)
             WeatherBackground(
                 condition = weatherValues?.condition ?: "N/A",
+                isDay = weatherValues?.isDay ?: true,
                 modifier = Modifier.matchParentSize()
             )
 
