@@ -80,7 +80,8 @@ data class ForecastPeriod(
     val windSpeed: String? = null,
     val windDirection: String? = null,
     val shortForecast: String? = null,
-    val detailedForecast: String? = null
+    val detailedForecast: String? = null,
+    val isDaytime: Boolean? = null
 )
 
 @Serializable
@@ -181,6 +182,8 @@ data class WeatherValues(
     val sunrise: String? = null,
     val sunset: String? = null,
     val isDay: Boolean = true,
+    val highTemp: Int? = null,
+    val lowTemp: Int? = null,
     val aqi: Int? = null,
     val aqiForecast: List<AqiDayInfo> = emptyList()
 )

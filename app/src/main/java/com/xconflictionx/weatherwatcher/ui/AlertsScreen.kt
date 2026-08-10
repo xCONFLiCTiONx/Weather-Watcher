@@ -811,6 +811,25 @@ fun CurrentWeatherHero(
                     ),
                     color = textColor
                 )
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "H ", style = MaterialTheme.typography.labelSmall, color = subTextColor)
+                    Text(
+                        text = if (weatherValues?.highTemp != null) "${weatherValues.highTemp}°" else "--°",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(text = "L ", style = MaterialTheme.typography.labelSmall, color = subTextColor)
+                    Text(
+                        text = if (weatherValues?.lowTemp != null) "${weatherValues.lowTemp}°" else "--°",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Text(
                     text = weatherValues?.condition ?: "N/A",
                     style = MaterialTheme.typography.titleLarge,

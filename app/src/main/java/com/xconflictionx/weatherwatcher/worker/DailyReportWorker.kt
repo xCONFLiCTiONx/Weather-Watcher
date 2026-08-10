@@ -36,6 +36,8 @@ class DailyReportWorker(
             val hourly = repository.fetchForecast()
             
             val temp = weather?.temperature?.toInt()?.toString() ?: "--"
+            val high = weather?.highTemp?.toString() ?: "--"
+            val low = weather?.lowTemp?.toString() ?: "--"
             val condition = weather?.condition ?: "N/A"
             val aqi = weather?.aqi ?: "N/A"
             val aqiLabel = if (weather?.aqi != null) " (${repository.getAqiLabel(weather.aqi)})" else ""
@@ -84,7 +86,7 @@ class DailyReportWorker(
             }
 
             val title = "🌤️ Your Daily Weather Report"
-            val message = "Current: $temp° ($condition) | AQI: $aqi$aqiLabel.$rainText$alertText"
+            val message = "Current: $temp° ($condition) | High: $high° | Low: $low° | AQI: $aqi$aqiLabel.$rainText$alertText"
 
             Log.d("DailyReportWorker", "Sending notification: $title")
             notificationHelper.showNotification(

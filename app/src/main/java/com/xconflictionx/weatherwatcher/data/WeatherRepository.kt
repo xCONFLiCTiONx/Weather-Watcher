@@ -529,9 +529,12 @@ class WeatherRepository(private val context: Context) {
             }
         }
 
+        val dailyDeferred = async { fetchDailyForecast() }
+
         val obsResponse = obsDeferred.await() ?: return@coroutineScope null
         val sunResponse = sunDeferred.await()
         val aqiResponse = aqiDeferred.await()
+        val dailyForecast = dailyDeferred.await()
 
         // 1. Temperature & Basic Obs
         val tempC = obsResponse.properties.temperature?.value ?: return@coroutineScope null
@@ -539,8 +542,16 @@ class WeatherRepository(private val context: Context) {
         val temp = if (isImperial) (tempC * 9/5) + 32 else tempC
         val lastUpdated = java.time.ZonedDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+
+        // 2. High/Low Temp extraction
+        var high: Int? = null
+        var low: Int? = null
+        dailyForecast?.let { periods ->
+            high = periods.firstOrNull { it.isDaytime == true }?.temperature
+            low = periods.firstOrNull { it.isDaytime == false }?.temperature
+        }
         
-        // 2. Sun Times & Rain Probability
+        // 3. Sun Times & Rain Probability
         var sunrise: String? = null
         var sunset: String? = null
         var rainProb: Int? = null
@@ -613,6 +624,8 @@ class WeatherRepository(private val context: Context) {
             sunrise = sunrise,
             sunset = sunset,
             isDay = isDayResult,
+            highTemp = high,
+            lowTemp = low,
             aqi = aqiValue,
             aqiForecast = aqiForecast.sortedBy { it.date }
         )
