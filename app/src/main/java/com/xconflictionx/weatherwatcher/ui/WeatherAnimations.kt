@@ -132,8 +132,8 @@ fun LottieWeatherAnimation(resId: Int, modifier: Modifier = Modifier) {
         composition = composition,
         progress = { progress },
         modifier = modifier
-            .alpha(0.25f) // Reverted to 25% opacity
-            .blur(radius = 12.dp), // Reverted to 12.dp blur
+            .alpha(0.14f) // Reverted to 14% opacity
+            .blur(radius = 7.dp), // Reverted to 7.dp blur
         contentScale = ContentScale.Crop,
         alignment = androidx.compose.ui.Alignment.Center
     )

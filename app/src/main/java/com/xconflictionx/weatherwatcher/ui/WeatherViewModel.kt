@@ -307,40 +307,44 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     _serviceStatuses.value = statuses.toMap()
                 }
 
-                // 2. NWS Alerts & Regional Safety
+                // 2. Comprehensive Alerts Lane (NWS + Local)
                 launch {
+                    val finalAlerts = mutableListOf<WeatherEvent>()
+                    
+                    // A. Fetch NWS Alerts
                     try {
-                        val alerts = repository.fetchAlerts()
+                        val nws = repository.fetchAlerts()
+                        finalAlerts.addAll(nws)
                         statuses["NWS Severe Alerts"] = true
                         statuses["Regional Safety"] = true
-                        _activeAlerts.value = alerts
-                        repository.saveLastAlerts(alerts)
                     } catch (e: Exception) {
                         statuses["NWS Severe Alerts"] = false
                         statuses["Regional Safety"] = false
                     }
-                    _serviceStatuses.value = statuses.toMap()
-                }
 
-                // 3. ArcGIS Infrastructure Alerts
-                launch {
+                    // B. Fetch Local Alerts (if enabled)
                     if (_infrastructureAlertsEnabled.value) {
                         try {
                             val local = repository.fetchInfrastructureAlerts()
-                            val nws = _activeAlerts.value.filter { !it.id.contains("infra") }
-                            val combined = (nws + local).distinctBy { 
-                                it.title.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
-                            }
-                            _activeAlerts.value = combined
+                            finalAlerts.addAll(local)
                             statuses["Community Infrastructure"] = true
                         } catch (e: Exception) {
                             statuses["Community Infrastructure"] = false
                         }
-                        _serviceStatuses.value = statuses.toMap()
                     } else {
                         statuses["Community Infrastructure"] = true
-                        _serviceStatuses.value = statuses.toMap()
                     }
+
+                    // C. Deduplicate and Update State ONCE
+                    // Using normalized title + description as fallback if IDs are missing/test
+                    val cleanList = finalAlerts.distinctBy { 
+                        if (it.id.contains("alert_") || it.id.contains("infra")) it.id 
+                        else it.title + it.description 
+                    }
+                    
+                    _activeAlerts.value = cleanList
+                    repository.saveLastAlerts(cleanList)
+                    _serviceStatuses.value = statuses.toMap()
                 }
 
                 // 4. Forecasts (Hourly) & Rain Logic

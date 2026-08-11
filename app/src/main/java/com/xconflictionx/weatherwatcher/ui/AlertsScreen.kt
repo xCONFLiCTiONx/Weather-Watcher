@@ -176,7 +176,7 @@ fun AlertsScreen(
                     EmptyAlertsView()
                 }
             } else {
-                items(activeAlerts) { alert ->
+                items(activeAlerts, key = { it.id }) { alert ->
                     AlertItem(
                         alert = alert,
                         onClick = { selectedAlert = alert }
@@ -1000,7 +1000,7 @@ fun ForecastSection(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(periods) { period ->
+            items(periods, key = { if (isDaily) it.name ?: it.startTime else it.startTime }) { period ->
                 ForecastItem(period, isDaily, onItemClick)
             }
         }
@@ -1156,7 +1156,7 @@ fun AqiOutlookSection(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(aqiForecast) { info ->
+            items(aqiForecast, key = { it.date }) { info ->
                 AqiTile(info, onTileClick)
             }
         }

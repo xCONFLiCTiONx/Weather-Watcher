@@ -507,6 +507,7 @@ class WeatherRepository(private val context: Context) {
                         hash = feature.properties.hashCode()
                     )
                 }
+                .distinctBy { it.id } // Ensure NWS doesn't send duplicate IDs for overlapping zones
         } ?: emptyList()
     }
 
