@@ -318,6 +318,14 @@ class WeatherRepository(private val context: Context) {
         return sharedPrefs.getBoolean("track_weather_enabled", false)
     }
 
+    fun saveLocationUpdatesEnabled(enabled: Boolean) {
+        sharedPrefs.edit().putBoolean("location_updates_enabled", enabled).apply()
+    }
+
+    fun isLocationUpdatesEnabled(): Boolean {
+        return sharedPrefs.getBoolean("location_updates_enabled", true)
+    }
+
     fun saveRegionalSafetyEnabled(enabled: Boolean) {
         sharedPrefs.edit().putBoolean("regional_safety_enabled", enabled).apply()
     }

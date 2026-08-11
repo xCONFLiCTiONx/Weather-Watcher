@@ -25,12 +25,13 @@ class WeatherAlertWorker(
         // 1. Every check starts with a Location Refresh
         try {
             val newLocation = repository.refreshLocationFromGps()
-            if (newLocation != null) {
+            if (newLocation != null && repository.isLocationUpdatesEnabled()) {
                 // User has traveled to a new area
                 notificationHelper.showNotification(
                     title = "📍 Tracking active",
                     message = "Location updated to $newLocation. Monitoring local hazards.",
-                    channelId = NotificationHelper.CHANNEL_GENERAL_ID
+                    channelId = NotificationHelper.CHANNEL_LOCATION_ID,
+                    notificationId = NotificationHelper.LOCATION_NOTIFICATION_ID
                 )
             }
         } catch (e: Exception) {

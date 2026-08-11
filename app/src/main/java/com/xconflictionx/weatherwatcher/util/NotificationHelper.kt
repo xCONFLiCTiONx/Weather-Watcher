@@ -28,7 +28,11 @@ class NotificationHelper(private val context: Context) {
         const val CHANNEL_GENERAL_ID = "general_info"
         const val CHANNEL_GENERAL_NAME = "General System Info"
 
+        const val CHANNEL_LOCATION_ID = "location_updates"
+        const val CHANNEL_LOCATION_NAME = "Location Updates"
+
         const val RAIN_NOTIFICATION_ID = 555
+        const val LOCATION_NOTIFICATION_ID = 777
     }
 
     init {
@@ -55,6 +59,9 @@ class NotificationHelper(private val context: Context) {
                 },
                 NotificationChannel(CHANNEL_GENERAL_ID, CHANNEL_GENERAL_NAME, NotificationManager.IMPORTANCE_LOW).apply {
                     description = "Non-critical system notes and location detection confirmations"
+                },
+                NotificationChannel(CHANNEL_LOCATION_ID, CHANNEL_LOCATION_NAME, NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Notifications for significant location changes during travel"
                 }
             )
 

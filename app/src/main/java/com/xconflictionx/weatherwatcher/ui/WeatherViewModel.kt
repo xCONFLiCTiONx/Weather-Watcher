@@ -91,6 +91,9 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private val _trackWeatherEnabled = MutableStateFlow(repository.isTrackWeatherEnabled())
     val trackWeatherEnabled: StateFlow<Boolean> = _trackWeatherEnabled
 
+    private val _locationUpdatesEnabled = MutableStateFlow(repository.isLocationUpdatesEnabled())
+    val locationUpdatesEnabled: StateFlow<Boolean> = _locationUpdatesEnabled
+
     private val _regionalSafetyEnabled = MutableStateFlow(repository.isRegionalSafetyEnabled())
     val regionalSafetyEnabled: StateFlow<Boolean> = _regionalSafetyEnabled
 
@@ -442,6 +445,11 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     fun updateTrackWeatherEnabled(enabled: Boolean) {
         _trackWeatherEnabled.value = enabled
         repository.saveTrackWeatherEnabled(enabled)
+    }
+
+    fun updateLocationUpdatesEnabled(enabled: Boolean) {
+        _locationUpdatesEnabled.value = enabled
+        repository.saveLocationUpdatesEnabled(enabled)
     }
 
     fun updateRegionalSafetyEnabled(enabled: Boolean) {

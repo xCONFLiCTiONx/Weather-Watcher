@@ -49,6 +49,7 @@ fun SettingsScreen(
     val dailyReportTime by viewModel.dailyReportTime.collectAsState()
     val rainAlertEnabled by viewModel.rainAlertEnabled.collectAsState()
     val trackWeatherEnabled by viewModel.trackWeatherEnabled.collectAsState()
+    val locationUpdatesEnabled by viewModel.locationUpdatesEnabled.collectAsState()
     val regionalSafetyEnabled by viewModel.regionalSafetyEnabled.collectAsState()
     val infrastructureAlertsEnabled by viewModel.infrastructureAlertsEnabled.collectAsState()
     val localFeeds by viewModel.localFeeds.collectAsState()
@@ -255,12 +256,14 @@ fun SettingsScreen(
                         dailyReportEnabled,
                         dailyReportTime,
                         trackWeatherEnabled,
+                        locationUpdatesEnabled,
                         rainAlertEnabled,
                         onDailyReportToggle = { viewModel.updateDailyReportEnabled(it) },
                         onDailyReportTimeClick = { h, m -> 
                             TimePickerDialog(context, { _, h2, m2 -> viewModel.updateDailyReportTime(h2, m2) }, h, m, false).show()
                         },
                         onTrackToggle = { viewModel.updateTrackWeatherEnabled(it) },
+                        onLocationUpdatesToggle = { viewModel.updateLocationUpdatesEnabled(it) },
                         onRainToggle = { viewModel.updateRainAlertEnabled(it) }
                     )
                 }
@@ -543,7 +546,7 @@ fun LocationInputRow(input: String, onValueChange: (String) -> Unit, onDetectCli
 }
 
 @Composable
-fun NotificationToggles(dailyEnabled: Boolean, dailyTime: Pair<Int, Int>, trackEnabled: Boolean, rainEnabled: Boolean, onDailyReportToggle: (Boolean) -> Unit, onDailyReportTimeClick: (Int, Int) -> Unit, onTrackToggle: (Boolean) -> Unit, onRainToggle: (Boolean) -> Unit) {
+fun NotificationToggles(dailyEnabled: Boolean, dailyTime: Pair<Int, Int>, trackEnabled: Boolean, locationUpdatesEnabled: Boolean, rainEnabled: Boolean, onDailyReportToggle: (Boolean) -> Unit, onDailyReportTimeClick: (Int, Int) -> Unit, onTrackToggle: (Boolean) -> Unit, onLocationUpdatesToggle: (Boolean) -> Unit, onRainToggle: (Boolean) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(modifier = Modifier.weight(1f)) {
@@ -564,6 +567,10 @@ fun NotificationToggles(dailyEnabled: Boolean, dailyTime: Pair<Int, Int>, trackE
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(modifier = Modifier.weight(1f)) { Text("Track", style = MaterialTheme.typography.bodyLarge); Text("Notifications on weather changes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Switch(checked = trackEnabled, onCheckedChange = onTrackToggle)
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(modifier = Modifier.weight(1f)) { Text("Location Updates", style = MaterialTheme.typography.bodyLarge); Text("Notify when your location changes significantly.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Switch(checked = locationUpdatesEnabled, onCheckedChange = onLocationUpdatesToggle)
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Rain Alerts", style = MaterialTheme.typography.bodyLarge)
