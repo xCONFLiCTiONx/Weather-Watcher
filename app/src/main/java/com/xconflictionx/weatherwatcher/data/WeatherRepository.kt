@@ -551,11 +551,13 @@ class WeatherRepository(private val context: Context) {
         val lastUpdated = java.time.ZonedDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
 
-        // 2. High/Low Temp extraction
+        // 2. High/Low Temp extraction (Finding best High/Low for the next 24h)
         var high: Int? = null
         var low: Int? = null
         dailyForecast?.let { periods ->
+            // High is usually the first daytime period
             high = periods.firstOrNull { it.isDaytime == true }?.temperature
+            // Low is usually the first nighttime period
             low = periods.firstOrNull { it.isDaytime == false }?.temperature
         }
         

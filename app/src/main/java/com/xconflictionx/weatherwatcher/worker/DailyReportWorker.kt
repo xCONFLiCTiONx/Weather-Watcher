@@ -92,7 +92,8 @@ class DailyReportWorker(
             notificationHelper.showNotification(
                 title = title, 
                 message = message, 
-                channelId = NotificationHelper.CHANNEL_DAILY_ID
+                channelId = NotificationHelper.CHANNEL_DAILY_ID,
+                notificationId = NotificationHelper.DAILY_REPORT_ID
             )
             
         } catch (e: Exception) {

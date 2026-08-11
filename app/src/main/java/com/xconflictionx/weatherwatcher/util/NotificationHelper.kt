@@ -33,6 +33,9 @@ class NotificationHelper(private val context: Context) {
 
         const val RAIN_NOTIFICATION_ID = 555
         const val LOCATION_NOTIFICATION_ID = 777
+        const val DAILY_REPORT_ID = 101
+        const val CONDITION_UPDATE_ID = 102
+        const val ALERT_BASE_ID = 2000
     }
 
     init {

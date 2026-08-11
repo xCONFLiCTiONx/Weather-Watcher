@@ -108,6 +108,9 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private val _serviceStatuses = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val serviceStatuses: StateFlow<Map<String, Boolean>> = _serviceStatuses
 
+    private val _selectedAnimationRes = MutableStateFlow<Int?>(null)
+    val selectedAnimationRes: StateFlow<Int?> = _selectedAnimationRes
+
     val consoleLogs = ConsoleManager.logs
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -115,7 +118,11 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             Log.d("WeatherViewModel", "Cache changed for $key, syncing UI...")
             viewModelScope.launch {
                 when (key) {
-                    "last_weather" -> _currentWeather.value = repository.getLastWeather()
+                    "last_weather" -> {
+                        val weather = repository.getLastWeather()
+                        _currentWeather.value = weather
+                        updateBackgroundAnimation(weather)
+                    }
                     "last_alerts" -> _activeAlerts.value = repository.getLastAlerts()
                     "last_hourly_forecast" -> {
                         val hourly = repository.getLastHourlyForecast()
@@ -130,12 +137,36 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         repository.registerListener(prefListener)
+        val initialWeather = repository.getLastWeather()
+        updateBackgroundAnimation(initialWeather)
         refreshWeather(isManual = false)
         startWeatherWork()
         updateBatteryOptimizationStatus()
         startServiceHealer()
         if (repository.isDailyReportEnabled()) {
             com.xconflictionx.weatherwatcher.worker.DailyReportWorker.scheduleNext(context, repository)
+        }
+    }
+
+    private fun updateBackgroundAnimation(weather: WeatherValues?) {
+        if (weather == null) return
+        val category = getWeatherCategory(weather.condition)
+        val pool = getWeatherPool(category, weather.isDay)
+        
+        if (pool.isNotEmpty()) {
+            val currentRes = _selectedAnimationRes.value
+            // If the current res is already in the pool, we don't change it 
+            // unless the category or time of day changed (handled by re-fetching pool).
+            // Actually, the user wants "random on app load" and "change on weather change".
+            // So if category is the same, we keep it.
+            
+            // To detect "category change", we'll check if the pool contains the current res.
+            // If it doesn't, or if we have no res yet, we pick a new one.
+            if (currentRes == null || !pool.contains(currentRes)) {
+                val newRes = pool[kotlin.random.Random.nextInt(pool.size)]
+                Log.d("WeatherViewModel", "Updating animation: Category=$category, IsDay=${weather.isDay}, Res=$newRes")
+                _selectedAnimationRes.value = newRes
+            }
         }
     }
 
@@ -265,6 +296,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         if (weather != null) {
                             _currentWeather.value = weather
                             repository.saveLastWeather(weather)
+                            updateBackgroundAnimation(weather)
                             statuses["Open-Meteo (AQI/Sun)"] = true
                         } else {
                             statuses["Open-Meteo (AQI/Sun)"] = false

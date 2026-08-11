@@ -52,6 +52,7 @@ fun AlertsScreen(
     val errorMessage by viewModel.errorMessage.collectAsState()
     val isCurrentlyRaining by viewModel.isCurrentlyRaining.collectAsState()
     val trackWeatherEnabled by viewModel.trackWeatherEnabled.collectAsState()
+    val selectedAnimationRes by viewModel.selectedAnimationRes.collectAsState()
 
     var selectedAlert by remember { mutableStateOf<WeatherEvent?>(null) }
     var selectedForecast by remember { mutableStateOf<ForecastPeriod?>(null) }
@@ -117,6 +118,7 @@ fun AlertsScreen(
                     isCurrentlyRaining = isCurrentlyRaining,
                     trackWeatherEnabled = trackWeatherEnabled,
                     onTrackToggle = { viewModel.updateTrackWeatherEnabled(it) },
+                    selectedAnimationRes = selectedAnimationRes,
                     onClick = { showMainDetails = true }
                 )
             }
@@ -750,6 +752,7 @@ fun CurrentWeatherHero(
     isCurrentlyRaining: Boolean,
     trackWeatherEnabled: Boolean,
     onTrackToggle: (Boolean) -> Unit,
+    selectedAnimationRes: Int?,
     onClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
@@ -774,8 +777,7 @@ fun CurrentWeatherHero(
         Box(modifier = Modifier.fillMaxWidth()) {
             // Animated Weather Background Layer (Matches Card Size Exactly)
             WeatherBackground(
-                condition = weatherValues?.condition ?: "N/A",
-                isDay = weatherValues?.isDay ?: true,
+                resId = selectedAnimationRes,
                 modifier = Modifier.matchParentSize()
             )
 
@@ -812,22 +814,43 @@ fun CurrentWeatherHero(
                     color = textColor
                 )
                 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "H ", style = MaterialTheme.typography.labelSmall, color = subTextColor)
-                    Text(
-                        text = if (weatherValues?.highTemp != null) "${weatherValues.highTemp}°" else "--°",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = textColor,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(text = "L ", style = MaterialTheme.typography.labelSmall, color = subTextColor)
-                    Text(
-                        text = if (weatherValues?.lowTemp != null) "${weatherValues.lowTemp}°" else "--°",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = textColor,
-                        fontWeight = FontWeight.Bold
-                    )
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    // High Temp
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "HIGH",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                            color = subTextColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (weatherValues?.highTemp != null) "${weatherValues.highTemp}°" else "--°",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = textColor,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(32.dp))
+                    
+                    // Low Temp
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "LOW",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                            color = subTextColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (weatherValues?.lowTemp != null) "${weatherValues.lowTemp}°" else "--°",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = textColor,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                 }
 
                 Text(

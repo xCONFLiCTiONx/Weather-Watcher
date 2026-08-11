@@ -64,7 +64,8 @@ class WeatherAlertWorker(
                     notificationHelper.showNotification(
                         title = "Weather Update",
                         message = "Current conditions: $condition $verb currently in progress.",
-                        channelId = NotificationHelper.CHANNEL_GENERAL_ID
+                        channelId = NotificationHelper.CHANNEL_GENERAL_ID,
+                        notificationId = NotificationHelper.CONDITION_UPDATE_ID
                     )
                 }
             }
@@ -163,7 +164,8 @@ class WeatherAlertWorker(
                         title = "${if (isLocal) "📍" else "⚠️"} ${event.title}",
                         message = "$summary\n\nSource: ${if (isLocal) "Local Community" else "NWS"}",
                         channelId = if (isLocal) NotificationHelper.CHANNEL_LOCAL_ID else NotificationHelper.CHANNEL_SEVERE_ID,
-                        isEmergency = isEmergency
+                        isEmergency = isEmergency,
+                        notificationId = NotificationHelper.ALERT_BASE_ID + Math.abs(event.title.hashCode())
                     )
                 }
             }

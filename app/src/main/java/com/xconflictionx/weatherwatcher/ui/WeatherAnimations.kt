@@ -1,5 +1,8 @@
 package com.xconflictionx.weatherwatcher.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -11,13 +14,12 @@ import com.airbnb.lottie.compose.*
 import com.xconflictionx.weatherwatcher.R
 import kotlin.random.Random
 
-@Composable
-fun WeatherBackground(condition: String, isDay: Boolean, modifier: Modifier = Modifier) {
+/**
+ * Categorizes a NWS condition string into a stable visual category.
+ */
+fun getWeatherCategory(condition: String): String {
     val cond = condition.lowercase()
-    
-    // session-stable randomization: Pick a random one for the category and stick to it.
-    // Categorize into broad visual groups for randomization
-    val category = when {
+    return when {
         cond.contains("thunderstorm") -> "thunder"
         cond.contains("heavy rain") -> "heavy_rain"
         cond.contains("rain") || cond.contains("showers") -> "rain"
@@ -26,14 +28,21 @@ fun WeatherBackground(condition: String, isDay: Boolean, modifier: Modifier = Mo
         cond.contains("ice") || cond.contains("sleet") -> "ice"
         cond.contains("fog") || cond.contains("haze") || cond.contains("smoke") || cond.contains("mist") -> "mist"
         cond.contains("wind") -> "wind"
-        cond.contains("mostly") || cond.contains("partly") || cond.contains("scattered") || cond.contains("few clouds") || cond.contains("broken clouds") -> "clouds_mixed"
-        cond.contains("overcast") || cond.contains("cloud") -> "clouds_heavy"
+        // Move "Overcast/Cloudy" up so they take precedence over "Mostly"
+        cond.contains("overcast") || cond == "cloudy" || cond.contains("broken clouds") -> "heavy_clouds"
+        // Mixed logic: Only if it's not strictly clear or overcast
+        cond.contains("partly") || cond.contains("scattered") || cond.contains("few clouds") || (cond.contains("mostly") && cond.contains("sunny")) -> "clouds_mixed"
+        // Clear logic: "Clear", "Fair", "Mostly Clear" all count as Clear Sky
         cond.contains("sun") || cond.contains("clear") || cond.contains("fair") -> "clear"
         else -> "unknown"
     }
+}
 
-    // Build the specific resource pool based on category and time of day
-    val resources = when (category) {
+/**
+ * Returns a list of Lottie resource IDs for a given category and time of day.
+ */
+fun getWeatherPool(category: String, isDay: Boolean): List<Int> {
+    return when (category) {
         "thunder" -> if (isDay) {
             listOf(R.raw.weather_day_thunderstorm, R.raw.weather_thunder, R.raw.thunderstorms_day_extreme_rain)
         } else {
@@ -47,9 +56,9 @@ fun WeatherBackground(condition: String, isDay: Boolean, modifier: Modifier = Mo
         }
         
         "rain" -> if (isDay) {
-            listOf(R.raw.weather_day_rain, R.raw.weather_day_shower_rains, R.raw.weather_icon_rain)
+            listOf(R.raw.weather_icon_rain, R.raw.weather_day_rain, R.raw.weather_day_shower_rains)
         } else {
-            listOf(R.raw.weather_night_rain, R.raw.weather_night_shower_rains, R.raw.weather_icon_rain)
+            listOf(R.raw.weather_icon_rain, R.raw.weather_night_rain, R.raw.weather_night_shower_rains)
         }
         
         "drizzle" -> if (isDay) {
@@ -94,14 +103,20 @@ fun WeatherBackground(condition: String, isDay: Boolean, modifier: Modifier = Mo
         
         else -> emptyList()
     }
+}
 
-    // Session-stable randomization: Pick one and remember it for the life of this composable
-    val selectedResId = remember(category, isDay) {
-        if (resources.isNotEmpty()) resources[Random.nextInt(resources.size)] else null
-    }
-
-    if (selectedResId != null) {
-        LottieWeatherAnimation(selectedResId, modifier)
+@Composable
+fun WeatherBackground(resId: Int?, modifier: Modifier = Modifier) {
+    // Crossfade provides a smooth transition when the resource ID changes
+    Crossfade(
+        targetState = resId,
+        modifier = modifier, 
+        animationSpec = tween(1500), 
+        label = "weather_fade"
+    ) { targetResId ->
+        if (targetResId != null) {
+            LottieWeatherAnimation(targetResId, Modifier.fillMaxSize())
+        }
     }
 }
 
@@ -117,9 +132,9 @@ fun LottieWeatherAnimation(resId: Int, modifier: Modifier = Modifier) {
         composition = composition,
         progress = { progress },
         modifier = modifier
-            .alpha(0.15f) // Subtle but visible
-            .blur(radius = 12.dp),
-        contentScale = ContentScale.Crop, // Filled to the edges without stretching (aspect ratio maintained)
+            .alpha(0.25f) // Reverted to 25% opacity
+            .blur(radius = 12.dp), // Reverted to 12.dp blur
+        contentScale = ContentScale.Crop,
         alignment = androidx.compose.ui.Alignment.Center
     )
 }
