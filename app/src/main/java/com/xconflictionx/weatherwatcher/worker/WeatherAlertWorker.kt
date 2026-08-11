@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.xconflictionx.weatherwatcher.data.WeatherRepository
+import com.xconflictionx.weatherwatcher.data.*
 import com.xconflictionx.weatherwatcher.util.ConsoleManager
 import com.xconflictionx.weatherwatcher.util.NotificationHelper
 import kotlinx.coroutines.*
@@ -140,14 +140,20 @@ class WeatherAlertWorker(
         // 5. Consolidated Alerts (Regional & Infrastructure)
         try {
             val nwsAlerts = repository.fetchAlerts()
-            // Update cache so UI can react
-            repository.saveLastAlerts(nwsAlerts)
+            // Update cache so UI can react (only if we got a successful fetch)
+            if (nwsAlerts != null) {
+                repository.saveLastAlerts(nwsAlerts)
+            }
 
             val localAlerts = if (repository.isInfrastructureAlertsEnabled()) {
                 repository.fetchInfrastructureAlerts()
             } else emptyList()
 
-            (nwsAlerts + localAlerts).forEach { event ->
+            val combined = mutableListOf<WeatherEvent>()
+            if (nwsAlerts != null) combined.addAll(nwsAlerts)
+            if (localAlerts != null) combined.addAll(localAlerts)
+
+            combined.forEach { event ->
                 if (repository.shouldNotifyForNwsAlert(event)) {
                     val summary = event.description?.split("\n")?.firstOrNull() ?: "View details in app."
                     val isLocal = event.id.contains("infra", true)

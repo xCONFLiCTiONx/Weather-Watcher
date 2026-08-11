@@ -2,6 +2,10 @@ package com.xconflictionx.weatherwatcher.ui
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -113,6 +117,33 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     val consoleLogs = ConsoleManager.logs
 
+    private val connectivityManager = application.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    
+    private var networkChangeJob: Job? = null
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            networkChangeJob?.cancel()
+            networkChangeJob = viewModelScope.launch {
+                delay(3000) // Anti-flicker debounce
+                Log.d("WeatherViewModel", "Network restored, refreshing status board...")
+                refreshServiceStatuses()
+                refreshWeather(isManual = false)
+            }
+        }
+
+        override fun onLost(network: Network) {
+            networkChangeJob?.cancel()
+            networkChangeJob = viewModelScope.launch {
+                delay(3000) // Anti-flicker debounce
+                Log.d("WeatherViewModel", "Network lost, updating service statuses...")
+                val offlineStatuses = _serviceStatuses.value.toMutableMap()
+                offlineStatuses.keys.forEach { offlineStatuses[it] = false }
+                _serviceStatuses.value = offlineStatuses.toMap()
+            }
+        }
+    }
+
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "last_weather" || key == "last_alerts" || key == "last_hourly_forecast" || key == "last_daily_forecast") {
             Log.d("WeatherViewModel", "Cache changed for $key, syncing UI...")
@@ -137,6 +168,12 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         repository.registerListener(prefListener)
+        val networkRequest = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
+
+        refreshServiceStatuses()
         val initialWeather = repository.getLastWeather()
         updateBackgroundAnimation(initialWeather)
         refreshWeather(isManual = false)
@@ -207,70 +244,26 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun refreshServiceStatuses() {
+        viewModelScope.launch {
+            val statuses = _serviceStatuses.value.toMutableMap()
+            coroutineScope {
+                launch { statuses["NWS Forecasts"] = repository.checkServiceHealth("NWS") }
+                launch { statuses["NWS Severe Alerts"] = repository.checkServiceHealth("NWS") }
+                launch { statuses["Regional Safety"] = repository.checkServiceHealth("NWS") }
+                launch { statuses["Open-Meteo (AQI/Sun)"] = repository.checkServiceHealth("OpenMeteo") }
+                launch { statuses["Community Infrastructure"] = repository.checkServiceHealth("ArcGIS") }
+            }
+            _serviceStatuses.value = statuses.toMap()
+        }
+    }
+
     private fun startServiceHealer() {
         viewModelScope.launch {
             while (isActive) {
-                // Sleep for 60 seconds between optimal health checks
+                // Sleep for 60 seconds between health pings
                 delay(60_000)
-                
-                val currentStatuses = _serviceStatuses.value
-                val failedServices = currentStatuses.filter { !it.value }.keys
-                
-                if (failedServices.isNotEmpty()) {
-                    Log.d("WeatherViewModel", "Healer: Attempting to recover ${failedServices.size} failed services...")
-                    
-                    coroutineScope {
-                        failedServices.forEach { serviceName ->
-                            launch {
-                                try {
-                                    val success = when (serviceName) {
-                                        "NWS Forecasts" -> {
-                                            val hourly = repository.fetchForecast()
-                                            if (hourly != null) {
-                                                _hourlyForecast.value = hourly
-                                                true
-                                            } else false
-                                        }
-                                        "NWS Severe Alerts" -> {
-                                            val alerts = repository.fetchAlerts()
-                                            _activeAlerts.value = alerts
-                                            true
-                                        }
-                                        "Regional Safety" -> {
-                                            if (_regionalSafetyEnabled.value) {
-                                                repository.fetchAlerts()
-                                                true
-                                            } else true
-                                        }
-                                        "Open-Meteo (AQI/Sun)" -> {
-                                            val weather = repository.fetchCurrentWeather()
-                                            if (weather != null) {
-                                                _currentWeather.value = weather
-                                                true
-                                            } else false
-                                        }
-                                        "Community Infrastructure" -> {
-                                            if (_infrastructureAlertsEnabled.value) {
-                                                repository.fetchInfrastructureAlerts()
-                                                true
-                                            } else true
-                                        }
-                                        else -> true
-                                    }
-                                    
-                                    if (success) {
-                                        val updated = _serviceStatuses.value.toMutableMap()
-                                        updated[serviceName] = true
-                                        _serviceStatuses.value = updated
-                                        Log.d("WeatherViewModel", "Healer: $serviceName recovered successfully!")
-                                    }
-                                } catch (e: Exception) {
-                                    Log.w("WeatherViewModel", "Healer: Recovery failed for $serviceName - ${e.message}")
-                                }
-                            }
-                        }
-                    }
-                }
+                refreshServiceStatuses()
             }
         }
     }
@@ -283,7 +276,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     fun refreshWeather(isManual: Boolean = false) {
         updateBatteryOptimizationStatus()
         viewModelScope.launch {
-            if (isManual) _isRefreshing.value = true
+            if (isManual) {
+                _isRefreshing.value = true
+                refreshServiceStatuses() // Ping everyone immediately if user clicks refresh
+            }
             _errorMessage.value = null
             
             val statuses = _serviceStatuses.value.toMutableMap()
@@ -298,11 +294,9 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                             repository.saveLastWeather(weather)
                             updateBackgroundAnimation(weather)
                             statuses["Open-Meteo (AQI/Sun)"] = true
-                        } else {
-                            statuses["Open-Meteo (AQI/Sun)"] = false
                         }
                     } catch (e: Exception) {
-                        statuses["Open-Meteo (AQI/Sun)"] = false
+                        Log.e("WeatherViewModel", "Open-Meteo fetch failed: ${e.message}")
                     }
                     _serviceStatuses.value = statuses.toMap()
                 }
@@ -310,40 +304,44 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 // 2. Comprehensive Alerts Lane (NWS + Local)
                 launch {
                     val finalAlerts = mutableListOf<WeatherEvent>()
+                    var nwsSuccess = false
                     
-                    // A. Fetch NWS Alerts
                     try {
                         val nws = repository.fetchAlerts()
-                        finalAlerts.addAll(nws)
-                        statuses["NWS Severe Alerts"] = true
-                        statuses["Regional Safety"] = true
+                        if (nws != null) {
+                            finalAlerts.addAll(nws)
+                            nwsSuccess = true
+                        }
                     } catch (e: Exception) {
-                        statuses["NWS Severe Alerts"] = false
-                        statuses["Regional Safety"] = false
+                        Log.e("WeatherViewModel", "NWS Alerts fetch failed: ${e.message}")
                     }
 
-                    // B. Fetch Local Alerts (if enabled)
                     if (_infrastructureAlertsEnabled.value) {
                         try {
                             val local = repository.fetchInfrastructureAlerts()
-                            finalAlerts.addAll(local)
-                            statuses["Community Infrastructure"] = true
+                            if (local != null) {
+                                finalAlerts.addAll(local)
+                                statuses["Community Infrastructure"] = true
+                            }
                         } catch (e: Exception) {
-                            statuses["Community Infrastructure"] = false
+                            Log.e("WeatherViewModel", "ArcGIS fetch failed: ${e.message}")
                         }
-                    } else {
-                        statuses["Community Infrastructure"] = true
                     }
 
-                    // C. Deduplicate and Update State ONCE
-                    // Using normalized title + description as fallback if IDs are missing/test
-                    val cleanList = finalAlerts.distinctBy { 
-                        if (it.id.contains("alert_") || it.id.contains("infra")) it.id 
-                        else it.title + it.description 
+                    if (nwsSuccess) {
+                        statuses["NWS Severe Alerts"] = true
+                        statuses["Regional Safety"] = true
+                        
+                        val cleanList = finalAlerts
+                            .groupBy { it.title.lowercase().trim() }
+                            .map { (_, group) ->
+                                group.maxByOrNull { it.description?.length ?: 0 }!!
+                            }
+                            .sortedBy { it.severity }
+                        
+                        _activeAlerts.value = cleanList
+                        repository.saveLastAlerts(cleanList)
                     }
-                    
-                    _activeAlerts.value = cleanList
-                    repository.saveLastAlerts(cleanList)
                     _serviceStatuses.value = statuses.toMap()
                 }
 
@@ -362,41 +360,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                             val top24 = futureHourly.take(24)
                             _hourlyForecast.value = top24
                             repository.saveLastHourlyForecast(top24)
-                            
-                            // Process Rain Logic immediately from NWS (Source of Truth)
-                            val isRainy = { period: ForecastPeriod ->
-                                val prob = period.probabilityOfPrecipitation?.value ?: 0
-                                val forecast = period.shortForecast ?: ""
-                                prob > 20 && (forecast.contains("Rain", true) || 
-                                             forecast.contains("Showers", true) || 
-                                             forecast.contains("Thunderstorm", true) ||
-                                             forecast.contains("Drizzle", true) ||
-                                             forecast.contains("Precipitation", true) ||
-                                             forecast.contains("Sleet", true) ||
-                                             forecast.contains("Snow", true))
-                            }
-
-                            val nextRain = futureHourly.firstOrNull { isRainy(it) }
-                            if (nextRain != null) {
-                                val startTime = java.time.ZonedDateTime.parse(nextRain.startTime)
-                                val prob = nextRain.probabilityOfPrecipitation?.value ?: 0
-                                if (startTime.isBefore(now)) {
-                                    _isCurrentlyRaining.value = true
-                                    _nextRainTime.value = "${nextRain.endTime}|$prob"
-                                } else {
-                                    _isCurrentlyRaining.value = false
-                                    _nextRainTime.value = "${nextRain.startTime}|$prob"
-                                }
-                            } else {
-                                _isCurrentlyRaining.value = false
-                                _nextRainTime.value = null
-                            }
-                        } else {
-                            statuses["NWS Forecasts"] = false
+                            updateRainStatus(top24)
                         }
                     } catch (e: Exception) {
-                        statuses["NWS Forecasts"] = false
-                        Log.w("WeatherViewModel", "Hourly forecast failed: ${e.message}")
+                        Log.e("WeatherViewModel", "NWS Forecast fetch failed: ${e.message}")
                     }
                     _serviceStatuses.value = statuses.toMap()
                 }
@@ -650,5 +617,6 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         super.onCleared()
         repository.unregisterListener(prefListener)
+        connectivityManager.unregisterNetworkCallback(networkCallback)
     }
 }

@@ -68,6 +68,29 @@ class WeatherRepository(private val context: Context) {
         sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
+    suspend fun checkServiceHealth(service: String): Boolean = withContext(Dispatchers.IO) {
+        val url = when (service) {
+            "NWS" -> NwsApiService.BASE_URL
+            "OpenMeteo" -> "https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0" // Smallest possible req
+            "ArcGIS" -> ArcgisApiService.BASE_URL
+            else -> return@withContext false
+        }
+        
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("User-Agent", NwsApiService.USER_AGENT)
+            .build()
+            
+        try {
+            okHttpClient.newCall(request).execute().use { response ->
+                // Successful connection or specific API codes mean the service is UP
+                response.isSuccessful || (response.code in 400..499)
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private suspend fun <T> retryIO(
         times: Int = 2,
         initialDelay: Long = 2000,
@@ -359,8 +382,8 @@ class WeatherRepository(private val context: Context) {
         } ?: emptyList()
     }
 
-    fun saveLastAlerts(alerts: List<WeatherEvent>) {
-        if (alerts.isNotEmpty()) {
+    fun saveLastAlerts(alerts: List<WeatherEvent>?) {
+        if (!alerts.isNullOrEmpty()) {
             val jsonString = json.encodeToString(alerts)
             sharedPrefs.edit().putString("last_alerts", jsonString).apply()
         }
@@ -466,8 +489,8 @@ class WeatherRepository(private val context: Context) {
         }
     }
 
-    suspend fun fetchAlerts(): List<WeatherEvent> {
-        val coords = getCoordinates() ?: return emptyList()
+    suspend fun fetchAlerts(): List<WeatherEvent>? {
+        val coords = getCoordinates() ?: return null
         val selected = getSelectedAlerts()
         val regionalSafetyEnabled = isRegionalSafetyEnabled()
         
@@ -497,18 +520,22 @@ class WeatherRepository(private val context: Context) {
                     true
                 }
                 .map { feature ->
-                    val id = feature.properties.id ?: feature.properties.event ?: "alert_${System.currentTimeMillis()}"
+                    val eventName = feature.properties.event ?: "Alert"
+                    val desc = feature.properties.description ?: ""
+                    // Use NWS ID if present, otherwise create a STABLE content hash
+                    val id = feature.properties.id ?: "nws_${eventName.hashCode()}_${desc.hashCode()}"
+                    
                     WeatherEvent(
                         id = id,
-                        title = feature.properties.event ?: "Alert",
+                        title = eventName,
                         severity = feature.properties.severity ?: "Unknown",
                         description = feature.properties.description,
                         instruction = feature.properties.instruction,
                         hash = feature.properties.hashCode()
                     )
                 }
-                .distinctBy { it.id } // Ensure NWS doesn't send duplicate IDs for overlapping zones
-        } ?: emptyList()
+                .distinctBy { it.id }
+        }
     }
 
     suspend fun fetchCurrentWeather(): WeatherValues? = coroutineScope {
@@ -819,12 +846,12 @@ class WeatherRepository(private val context: Context) {
         return sharedPrefs.getStringSet("discovered_arcgis_urls", emptySet()) ?: emptySet()
     }
 
-    suspend fun fetchInfrastructureAlerts(): List<WeatherEvent> = withContext(Dispatchers.IO) {
+    suspend fun fetchInfrastructureAlerts(): List<WeatherEvent>? = withContext(Dispatchers.IO) {
         if (!isInfrastructureAlertsEnabled()) return@withContext emptyList()
         
-        val coords = getCoordinates() ?: return@withContext emptyList()
+        val coords = getCoordinates() ?: return@withContext null
         val parts = coords.split(",").mapNotNull { it.trim().toDoubleOrNull() }
-        if (parts.size != 2) return@withContext emptyList()
+        if (parts.size != 2) return@withContext null
 
         val lat = parts[0]
         val lon = parts[1]
@@ -832,14 +859,14 @@ class WeatherRepository(private val context: Context) {
         // Fix: Add explicit logging to verify coordinate order (lat vs lon)
         Log.d("WeatherRepository", "Infrastructure Fetch - Parsed Lat: $lat, Lon: $lon")
 
-        suspend fun fetchWithRadius(radius: Double): List<WeatherEvent> = coroutineScope {
+        suspend fun fetchWithRadius(radius: Double): List<WeatherEvent>? = coroutineScope {
             val bboxJson = "{\"xmin\":${lon - radius},\"ymin\":${lat - radius},\"xmax\":${lon + radius},\"ymax\":${lat + radius},\"spatialReference\":{\"wkid\":4326}}"
             val urls = getDiscoveredFeeds()
+            if (urls.isEmpty()) return@coroutineScope emptyList()
             
-            val deferredAlerts = urls.map { url ->
+            val deferredResults = urls.map { url ->
                 async {
                     try {
-                        // Tightened timeout to 3.5s to prevent dashboard hangs on distant/slow servers
                         withTimeout(3500) {
                             val response = arcgisApiService.queryFeatureService(
                                 url = url + "/0/query",
@@ -887,25 +914,31 @@ class WeatherRepository(private val context: Context) {
                                     )
                                 )
                             }
-                            feedAlerts
+                            Result.success(feedAlerts)
                         }
                     } catch (e: Exception) {
-                        // Silent log for individual feed failures to prevent Console flooding
-                        // Details are still available in Logcat for developers
                         Log.w("WeatherRepository", "Skipping slow/failed feed: $url - ${e.message}")
-                        emptyList<WeatherEvent>()
+                        Result.failure<List<WeatherEvent>>(e)
                     }
                 }
             }
-            deferredAlerts.awaitAll().flatten()
+            
+            val finalResults = deferredResults.awaitAll()
+            // If ALL urls failed and there were urls to fetch, return null (failure)
+            if (finalResults.all { it.isFailure } && urls.isNotEmpty()) {
+                null
+            } else {
+                finalResults.mapNotNull { it.getOrNull() }.flatten()
+            }
         }
 
         // Tier 1: Strict local (15 miles)
-        var results = fetchWithRadius(0.2)
+        var results = fetchWithRadius(0.2) ?: return@withContext null
         
         // Tier 2: Fallback to regional (40 miles) if nothing found locally
         if (results.isEmpty()) {
-            results = fetchWithRadius(0.5)
+            val tier2 = fetchWithRadius(0.5) ?: return@withContext null
+            results = tier2
         }
 
         results.distinctBy { it.title.lowercase().trim() + (it.description ?: "").lowercase().trim() }

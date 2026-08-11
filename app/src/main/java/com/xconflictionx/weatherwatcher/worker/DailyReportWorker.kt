@@ -42,7 +42,7 @@ class DailyReportWorker(
             val aqi = weather?.aqi ?: "N/A"
             val aqiLabel = if (weather?.aqi != null) " (${repository.getAqiLabel(weather.aqi)})" else ""
             
-            val alertCount = alerts.size
+            val alertCount = alerts?.size ?: 0
             val alertText = if (alertCount > 0) "\n⚠️ $alertCount active alerts." else "\n✅ No active hazards."
 
             var rainText = ""
