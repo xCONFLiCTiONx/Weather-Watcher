@@ -136,7 +136,17 @@ data class PollenDaily(
 @Serializable
 data class OpenMeteoEnvResponse(
     val daily: EnvDaily? = null,
-    val hourly: EnvHourly? = null
+    val hourly: EnvHourly? = null,
+    val current_weather: OpenMeteoCurrentWeather? = null
+)
+
+@Serializable
+data class OpenMeteoCurrentWeather(
+    val temperature: Float,
+    val windspeed: Float,
+    val weathercode: Int,
+    val is_day: Int,
+    val time: String
 )
 
 @Serializable

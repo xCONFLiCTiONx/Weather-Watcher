@@ -18,6 +18,7 @@ interface OpenMeteoApiService {
         @Query("longitude") lon: Double,
         @Query("daily") daily: String = "sunrise,sunset",
         @Query("hourly") hourly: String = "precipitation_probability",
+        @Query("current_weather") current: Boolean = true,
         @Query("timezone") timezone: String = "auto"
     ): OpenMeteoEnvResponse
 

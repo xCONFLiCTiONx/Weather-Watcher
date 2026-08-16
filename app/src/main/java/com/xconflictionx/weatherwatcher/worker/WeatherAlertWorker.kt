@@ -73,11 +73,11 @@ class WeatherAlertWorker(
             repository.saveLastWeather(currentWeather)
         }
 
-        // 4. Proactive Rain Detection
-        if (repository.isRainAlertEnabled() && periods != null) {
+        // 4. Proactive Rain Detection (Now with Fallback for Forecast Lag)
+        if (repository.isRainAlertEnabled()) {
             try {
-                // Find first rain period in the future
-                val nextRain = periods.firstOrNull { 
+                // Priority 1: NWS Hourly Forecast (gives us timing)
+                val nextRain = periods?.firstOrNull { 
                     val prob = it.probabilityOfPrecipitation?.value ?: 0
                     val isRain = it.shortForecast?.contains("Rain", ignoreCase = true) == true ||
                                  it.shortForecast?.contains("Showers", ignoreCase = true) == true ||
@@ -96,8 +96,8 @@ class WeatherAlertWorker(
                     val now = ZonedDateTime.now()
                     val diffMinutes = java.time.Duration.between(now, startTime).toMinutes()
 
-                    // Window: Starts within next 75 mins OR started within last 15 mins
-                    if (diffMinutes in 0..75 || diffMinutes in -15..-1) {
+                    // Window: Starts within next 75 mins OR started within last 60 mins (expanded window)
+                    if (diffMinutes in -60..75) {
                         if (repository.shouldNotifyForRainPeriod(nextRain.startTime)) {
                             val justStarted = diffMinutes < 0
                             val timeLabel = startTime.format(DateTimeFormatter.ofPattern("h:mm a"))
@@ -122,13 +122,27 @@ class WeatherAlertWorker(
                             )
                         }
 
-                        // Always update the stop time while rain is active/imminent to maintain the 3-hour silence rule
+                        // Update stop time to maintain cooldown
                         try {
                             val stopTime = ZonedDateTime.parse(nextRain.endTime).toInstant().toEpochMilli()
                             repository.saveLastRainStopTime(stopTime)
                         } catch (e: Exception) {
-                            // If parsing fails, just use current time as a fallback
-                            repository.saveLastRainStopTime(System.currentTimeMillis())
+                            repository.saveLastRainStopTime(System.currentTimeMillis() + 3600000)
+                        }
+                    }
+                } else if (currentWeather != null) {
+                    // Priority 2: Current Condition Fallback (if NWS forecast misses it)
+                    val cat = com.xconflictionx.weatherwatcher.ui.getWeatherCategory(currentWeather.condition)
+                    if (cat == "rain" || cat == "heavy_rain" || cat == "thunder" || cat == "drizzle") {
+                        if (repository.shouldNotifyForRainPeriod("current_fallback_${currentWeather.condition}")) {
+                            notificationHelper.showNotification(
+                                title = "🌧️ Precipitation detected",
+                                message = "Current conditions: ${currentWeather.condition}. Rain has started unexpectedly.",
+                                channelId = NotificationHelper.CHANNEL_RAIN_ID,
+                                notificationId = NotificationHelper.RAIN_NOTIFICATION_ID
+                            )
+                            // Use +1 hour as a safe default stop time for cooldown
+                            repository.saveLastRainStopTime(System.currentTimeMillis() + 3600000)
                         }
                     }
                 }

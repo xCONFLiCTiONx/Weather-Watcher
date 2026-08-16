@@ -29,7 +29,7 @@ fun getWeatherCategory(condition: String): String {
         cond.contains("fog") || cond.contains("haze") || cond.contains("smoke") || cond.contains("mist") -> "mist"
         cond.contains("wind") -> "wind"
         // Move "Overcast/Cloudy" up so they take precedence over "Mostly"
-        cond.contains("overcast") || cond == "cloudy" || cond.contains("broken clouds") -> "heavy_clouds"
+        cond.contains("overcast") || cond == "cloudy" || cond.contains("broken clouds") -> "clouds_heavy"
         // Mixed logic: Only if it's not strictly clear or overcast
         cond.contains("partly") || cond.contains("scattered") || cond.contains("few clouds") || (cond.contains("mostly") && cond.contains("sunny")) -> "clouds_mixed"
         // Clear logic: "Clear", "Fair", "Mostly Clear" all count as Clear Sky

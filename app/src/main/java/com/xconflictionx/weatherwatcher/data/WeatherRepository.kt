@@ -567,17 +567,31 @@ class WeatherRepository(private val context: Context) {
 
         val dailyDeferred = async { fetchDailyForecast() }
 
-        val obsResponse = obsDeferred.await() ?: return@coroutineScope null
+        val obsResponse = obsDeferred.await()
         val sunResponse = sunDeferred.await()
         val aqiResponse = aqiDeferred.await()
         val dailyForecast = dailyDeferred.await()
 
+        val omCurrent = sunResponse?.current_weather
+
         // 1. Temperature & Basic Obs
-        val tempC = obsResponse.properties.temperature?.value ?: return@coroutineScope null
+        val tempC = obsResponse?.properties?.temperature?.value ?: omCurrent?.temperature ?: return@coroutineScope null
         val isImperial = getUnits() == "imperial"
         val temp = if (isImperial) (tempC * 9/5) + 32 else tempC
         val lastUpdated = java.time.ZonedDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+
+        // Cross-verify NWS vs Open-Meteo for condition (NWS stations lag, OM models are proactive)
+        val nwsCondition = obsResponse?.properties?.textDescription
+        val omCondition = omCurrent?.let { getWmoDescription(it.weathercode) }
+        
+        val condition = if (nwsCondition?.contains("Clear", true) == true && 
+                            omCurrent?.weathercode != null && omCurrent.weathercode >= 51) {
+            // NWS says clear, but Open-Meteo model detects precipitation
+            omCondition ?: nwsCondition
+        } else {
+            nwsCondition ?: omCondition ?: "Unknown"
+        }
 
         // 2. High/Low Temp extraction (Finding best High/Low for the next 24h)
         var high: Int? = null
@@ -653,11 +667,11 @@ class WeatherRepository(private val context: Context) {
 
         WeatherValues(
             temperature = temp,
-            condition = obsResponse.properties.textDescription ?: "Unknown",
-            icon = obsResponse.properties.textDescription,
+            condition = condition,
+            icon = condition,
             lastUpdated = lastUpdated,
-            humidity = obsResponse.properties.relativeHumidity?.value,
-            windSpeed = obsResponse.properties.windSpeed?.value,
+            humidity = obsResponse?.properties?.relativeHumidity?.value ?: 0f,
+            windSpeed = obsResponse?.properties?.windSpeed?.value ?: omCurrent?.windspeed ?: 0f,
             rainProbability = rainProb,
             sunrise = sunrise,
             sunset = sunset,
@@ -978,6 +992,25 @@ class WeatherRepository(private val context: Context) {
             7101 -> "Heavy Ice Pellets"
             7102 -> "Light Ice Pellets"
             8000 -> "Thunderstorm"
+            else -> "Unknown"
+        }
+    }
+
+    fun getWmoDescription(code: Int): String {
+        return when (code) {
+            0 -> "Clear sky"
+            1, 2, 3 -> "Partly cloudy"
+            45, 48 -> "Fog"
+            51, 53, 55 -> "Drizzle"
+            56, 57 -> "Freezing Drizzle"
+            61, 63, 65 -> "Rain"
+            66, 67 -> "Freezing Rain"
+            71, 73, 75 -> "Snow fall"
+            77 -> "Snow grains"
+            80, 81, 82 -> "Rain showers"
+            85, 86 -> "Snow showers"
+            95 -> "Thunderstorm"
+            96, 99 -> "Thunderstorm with hail"
             else -> "Unknown"
         }
     }
