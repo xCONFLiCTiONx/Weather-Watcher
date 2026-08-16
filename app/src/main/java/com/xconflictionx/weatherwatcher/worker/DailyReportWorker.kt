@@ -42,8 +42,13 @@ class DailyReportWorker(
             val aqi = weather?.aqi ?: "N/A"
             val aqiLabel = if (weather?.aqi != null) " (${repository.getAqiLabel(weather.aqi)})" else ""
             
-            val alertCount = alerts?.size ?: 0
-            val alertText = if (alertCount > 0) "\n⚠️ $alertCount active alerts." else "\n✅ No active hazards."
+            val alertText = if (!alerts.isNullOrEmpty()) {
+                val distinctAlerts = alerts.distinctBy { it.title }
+                val alertNames = distinctAlerts.joinToString(", ") { it.title }
+                if (distinctAlerts.size == 1) "\n⚠️ Alert: $alertNames." else "\n⚠️ Alerts: $alertNames."
+            } else {
+                "\n✅ No active hazards."
+            }
 
             var rainText = ""
             if (hourly != null) {
