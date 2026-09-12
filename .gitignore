@@ -16,3 +16,13 @@ local.properties
 .idea
 .artifacts/
 .kotlin/
+
+# Keystores & Signing Keys
+*.jks
+*.keystore
+/app/keystore/
+
+# Build Outputs & Binaries
+*.apk
+*.aar
+/app/release/
