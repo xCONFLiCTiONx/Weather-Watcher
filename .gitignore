@@ -26,4 +26,3 @@ local.properties
 *.apk
 *.aar
 /app/release/
-privacy.md
